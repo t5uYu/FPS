@@ -269,8 +269,8 @@ function M:BuildPrefabList()
 
     local addedCount = 0
 
-    -- AnimAgent：在所有分类前插入"+ 导入本地 GLB"按钮
-    self:_BuildImportGLBButton(pc, btnClass)
+    -- AnimAgent：在所有分类前插入"+ 资产包"按钮
+    self:_BuildImportPackageButton(pc, btnClass)
 
     for _, category in ipairs(cats) do
         local header = UE.UWidgetBlueprintLibrary.Create(pc, btnClass, pc)
@@ -322,7 +322,7 @@ function M:BuildPrefabList()
 end
 
 --============================================================
--- AnimAgent：本地 GLB 导入入口
+-- AnimAgent：本地 UGC Runtime Package 导入入口
 --============================================================
 
 local _animAgentReady = false
@@ -344,23 +344,23 @@ local function _ensureAnimAgent(pc)
     return true
 end
 
-function M:_BuildImportGLBButton(pc, btnClass)
+function M:_BuildImportPackageButton(pc, btnClass)
     local btn = UE.UWidgetBlueprintLibrary.Create(pc, btnClass, pc)
     if not btn then
-        Warn("_BuildImportGLBButton: Create 失败")
+        Warn("_BuildImportPackageButton: Create 失败")
         return
     end
     if btn.w_label then
-        setupPrefabLabel(btn.w_label, "+ GLB", 128.0)
+        setupPrefabLabel(btn.w_label, "+ 资产包", 128.0)
     end
     setupPrefabButton(btn.w_btn, Colors.ImportBg)
     if btn.w_btn and btn.w_btn.OnPressed then
-        btn.w_btn.OnPressed:Add(self, function() self:OnClickImportGLB() end)
+        btn.w_btn.OnPressed:Add(self, function() self:OnClickImportPackage() end)
     end
     setupPrefabButtonSlot(self.w_panel_Prefabs:AddChild(btn))
 end
 
-function M:OnClickImportGLB()
+function M:OnClickImportPackage()
     local pc = self:GetOwningPlayer()
     if not pc then return end
     if not _ensureAnimAgent(pc) then
@@ -369,21 +369,21 @@ function M:OnClickImportGLB()
     end
 
     local files = UE.UAnimGenClient.OpenFileDialog(
-        "选择本地 GLB 模型", "", "GLB Model (*.glb)|*.glb", false)
+        "选择 UGC 资产包或模型", "", "UGC Asset (*.glb;*.gltf;*.zip;*.ugcpkg)|*.glb;*.gltf;*.zip;*.ugcpkg", false)
     if not files or files:Num() == 0 then
         self:SetStatus("已取消导入")
         return
     end
 
     local Core = require("Gameplay.AnimAgent.AnimAgentCore")
-    local uuid = Core:ImportLocal(files:Get(1), "")  -- UnLua TArray:Get 是 1-based
-    if uuid == "" then
+    local packageID = Core:ImportLocal(files:Get(1), "")  -- UnLua TArray:Get 是 1-based
+    if packageID == "" then
         self:SetStatus("导入失败 — 检查日志")
         return
     end
 
-    self:SetStatus(string.format("导入完成 [%s]，已加入预制体列表", uuid:sub(1, 8)))
-    -- 刷新 placeable 面板，新资产以 dyn:{uuid} 出现在 "AI 生成" 分类下
+    self:SetStatus(string.format("导入完成 [%s]，已加入预制体列表", packageID:sub(1, 8)))
+    -- 刷新 placeable 面板，新资产以 pkg:{package}:main 出现在 "UGC 资产" 分类下
     self:RebuildPrefabList()
 end
 

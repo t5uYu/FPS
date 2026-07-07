@@ -28,13 +28,12 @@
 ]]
 
 local Library  = require("Gameplay.AnimAgent.AnimAssetLibrary")
-local Registry = require("Gameplay.UGC.UGCPrefabRegistry")
 
 local FabClient = {}
 
 local _pc      = nil
 local _bridge  = nil     -- UFabClientBridge*
-local _import  = nil     -- UAnimImportBridge*（可选，用于 mesh 预加载）
+local _import  = nil     -- UAnimImportBridge*（可选，用于 runtime asset 预加载）
 local _initialized = false
 
 local function _tryGetComp(pc, cls)
@@ -177,40 +176,22 @@ function FabClient:RegisterDownloadedAsset(downloadResult, meta)
         return ""
     end
 
-    local uuid    = downloadResult.LocalUuid or ""
-    local glbPath = downloadResult.LocalFilePath
-    if uuid == "" then
-        uuid = glbPath:match("assets[/\\]([^/\\]+)[/\\]source") or tostring(downloadResult.AssetId or "unknown")
-    end
+    local localPath = downloadResult.LocalFilePath
 
     meta = meta or {}
-    local name = meta.name or ("Fab#" .. tostring(downloadResult.AssetId or uuid))
-
-    Library:Add({
-        uuid       = uuid,
-        name       = name,
-        prompt     = meta.description or "",
-        provider   = meta.source or "fab",
-        glb_path   = glbPath,
-        fab_id     = downloadResult.AssetId,
-        tags       = meta.tags or {},
-        created_at = os.time(),
-    })
-
-    Registry:RegisterDynamicGLB({
-        uuid     = uuid,
-        name     = name,
-        glb_path = glbPath,
-        provider = "fab",
-        prompt   = meta.description or "",
-    })
-
-    if _import then
-        pcall(function() _import:ImportGLBAsync(uuid, glbPath) end)
+    local name = meta.name or ("Fab#" .. tostring(downloadResult.AssetId or downloadResult.LocalUuid or "asset"))
+    local Core = require("Gameplay.AnimAgent.AnimAgentCore")
+    if not Core:IsReady() then
+        Core:Init(_pc, { import_bridge = _import })
     end
+    local uuid = Core:ImportPackageFromFile(localPath, name, "fab", {
+        fab_id      = downloadResult.AssetId,
+        description = meta.description or "",
+        tags        = meta.tags or {},
+    })
 
     print(string.format("[FabClient] 资产入库 uuid=%s name=%s path=%s",
-        uuid, name, glbPath))
+        uuid, name, localPath))
     return uuid
 end
 

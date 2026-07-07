@@ -27,7 +27,19 @@ struct FAnimAssetRecord
     UPROPERTY(BlueprintReadOnly)
     FString Name;
 
-    /** 本地 .glb 绝对路径 */
+    /** Runtime package id（新 UGC 管线） */
+    UPROPERTY(BlueprintReadOnly)
+    FString PackageId;
+
+    /** manifest.json 绝对路径（新 UGC 管线） */
+    UPROPERTY(BlueprintReadOnly)
+    FString ManifestPath;
+
+    /** 主模型源文件绝对路径（新 UGC 管线） */
+    UPROPERTY(BlueprintReadOnly)
+    FString SourcePath;
+
+    /** 本地 .glb 绝对路径（legacy） */
     UPROPERTY(BlueprintReadOnly)
     FString GLBPath;
 

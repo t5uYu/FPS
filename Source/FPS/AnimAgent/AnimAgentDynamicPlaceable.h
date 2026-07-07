@@ -24,9 +24,17 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimAgent")
     FString AssetUuid;
 
+    /** 关联的 UGC runtime package id。 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimAgent")
+    FString PackageId;
+
     /** 注入 GLB 加载得到的 mesh + 记录 uuid */
     UFUNCTION(BlueprintCallable, Category = "AnimAgent")
     void SetDynMesh(UStaticMesh* Mesh, const FString& InAssetUuid);
+
+    /** 注入 UGC runtime package 加载得到的 mesh，并记录 package/asset id。 */
+    UFUNCTION(BlueprintCallable, Category = "AnimAgent")
+    void SetRuntimeAsset(UStaticMesh* Mesh, const FString& InPackageId, const FString& InAssetId);
 
     //--------------------------------------------------------------
     // Placeable 接口兼容（SceneData / UGCEditorCore 调用）

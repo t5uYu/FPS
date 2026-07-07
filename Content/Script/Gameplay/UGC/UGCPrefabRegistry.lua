@@ -36,6 +36,11 @@ Registry._dynamic   = {}   -- 仅玩家自定义条目，用于序列化
 Registry.DynamicGLB = {}
 local DYN_PREFIX = "dyn:"
 
+-- UGC runtime package 资产
+-- key: "pkg:{package_id}:{asset_id}", value: { package_id, asset_id, manifest_path, name, provider, prompt }
+Registry.RuntimeAssets = {}
+local PKG_PREFIX = "pkg:"
+
 local PLACEABLE_BASE = "/Game/_UGC/Placeables/"
 
 local function assetNameToClassPath(assetName)
@@ -271,11 +276,12 @@ end
 
 function Registry.GetPath(id)  return Registry.Prefabs[id] end
 function Registry.IsValid(id)
-    return Registry.Prefabs[id] ~= nil or Registry.DynamicGLB[id] ~= nil
+    return Registry.Prefabs[id] ~= nil or Registry.DynamicGLB[id] ~= nil or Registry.RuntimeAssets[id] ~= nil
 end
 
---- 判定预制体类型："blueprint" | "dynamic_glb" | nil
+--- 判定预制体类型："blueprint" | "dynamic_glb" | "runtime_asset" | nil
 function Registry.GetKind(id)
+    if Registry.RuntimeAssets[id] then return "runtime_asset" end
     if Registry.DynamicGLB[id] then return "dynamic_glb" end
     if Registry.Prefabs[id] then return "blueprint" end
     return nil
@@ -284,6 +290,11 @@ end
 --- 取动态 glb 资产数据（含 glb_path）
 function Registry.GetDynamicGLB(id)
     return Registry.DynamicGLB[id]
+end
+
+--- 取 UGC runtime package 资产数据（含 manifest_path）
+function Registry.GetRuntimeAsset(id)
+    return Registry.RuntimeAssets[id]
 end
 
 --- 获取预制体元数据（description, tags, label, category）
@@ -346,6 +357,13 @@ function Registry:AddCustomPrefab(def)
 end
 
 function Registry:RemovePrefab(id)
+    -- Runtime package 动态资产：直接从 RuntimeAssets 移除
+    if Registry.RuntimeAssets[id] then
+        Registry.RuntimeAssets[id] = nil
+        Registry.Prefabs[id] = nil
+        return true
+    end
+
     -- 动态 glb：直接从 DynamicGLB 移除
     if Registry.DynamicGLB[id] then
         Registry.DynamicGLB[id] = nil
@@ -367,6 +385,54 @@ end
 --============================================================
 -- AnimAgent 动态 glb 资产注册
 --============================================================
+
+--- 注册一个 UGC runtime package 资产
+--- @param def { package_id, asset_id?, manifest_path, name?, provider?, prompt?, label?, category? }
+--- @return string id（"pkg:{package_id}:{asset_id}"）或 nil
+function Registry:RegisterRuntimeAsset(def)
+    if not def or not def.package_id or not def.manifest_path then
+        print("[UGCPrefabRegistry] RegisterRuntimeAsset 失败：缺少 package_id 或 manifest_path")
+        return nil
+    end
+
+    local assetID = def.asset_id or "main"
+    local id = PKG_PREFIX .. def.package_id .. ":" .. assetID
+    Registry.RuntimeAssets[id] = {
+        package_id    = def.package_id,
+        asset_id      = assetID,
+        name          = def.name or def.package_id,
+        manifest_path = def.manifest_path,
+        provider      = def.provider or "unknown",
+        prompt        = def.prompt or "",
+        thumbnail_path= def.thumbnail_path or "",
+    }
+
+    Registry.Prefabs[id] = "/Script/FPS.AnimAgentDynamicPlaceable"
+    Registry.Meta[id] = {
+        label    = def.label or def.name or def.package_id,
+        category = def.category or "UGC 资产",
+    }
+
+    local catName = Registry.Meta[id].category
+    for _, cat in ipairs(Registry.Categories) do
+        if cat.name == catName then
+            for _, item in ipairs(cat.items or {}) do
+                if item.id == id then
+                    item.label = Registry.Meta[id].label
+                    return id
+                end
+            end
+            cat.items[#cat.items+1] = { id = id, label = Registry.Meta[id].label }
+            return id
+        end
+    end
+
+    Registry.Categories[#Registry.Categories+1] = {
+        name  = catName,
+        items = { { id = id, label = Registry.Meta[id].label } },
+    }
+    return id
+end
 
 --- 注册一个由 AnimAgent 生成 / 导入的动态资产
 --- @param def { uuid, name, glb_path, provider?, prompt?, label?, category? }
@@ -406,6 +472,15 @@ function Registry:RegisterDynamicGLB(def)
         items = { { id = id, label = Registry.Meta[id].label } },
     }
     return id
+end
+
+--- 列出所有 UGC runtime package 动态资产
+function Registry:ListRuntimeAssets()
+    local list = {}
+    for id, v in pairs(Registry.RuntimeAssets) do
+        table.insert(list, { id = id, data = v })
+    end
+    return list
 end
 
 --- 列出所有 AnimAgent 动态资产

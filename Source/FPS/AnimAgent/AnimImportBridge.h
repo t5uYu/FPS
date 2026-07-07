@@ -1,8 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-// AnimImportBridge.h — glb 运行时导入 + 场景生成
+// AnimImportBridge.h — UGC runtime package / glTF 运行时导入 + 场景生成
 //
 // 当前阶段：仅提供骨架接口，待 glTFRuntime 插件安装后填充 Cpp 实现。
-// 设计目标：把 Saved/AnimAgent/assets/{uuid}/source.glb 加载为 UStaticMesh* 并 spawn 出 AStaticMeshActor。
+// 设计目标：把 UGC runtime package manifest 或 legacy glTF/GLB 文件加载为 UStaticMesh* 并 spawn 出 AStaticMeshActor。
 
 #pragma once
 
@@ -23,7 +23,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
  * UAnimImportBridge
  *
  * 职责：
- * - 把本地 glb → UStaticMesh*（运行时，依赖 glTFRuntime）
+ * - 把 UGC package manifest / 本地 glb → UStaticMesh*（运行时，依赖 glTFRuntime）
  * - 把 mesh spawn 到场景指定 transform
  * - 维护 uuid → 已加载 Mesh 的弱引用缓存
  *
@@ -46,12 +46,19 @@ public:
     FOnAnimMeshImportFailed OnMeshImportFailed;
 
     /**
-     * 异步把 glb 文件解析为 UStaticMesh
+     * 兼容入口：把 glTF/GLB 文件解析为 UStaticMesh
      * @param JobUuid       关联的生成任务 uuid
      * @param GLBFilePath   绝对路径
      */
     UFUNCTION(BlueprintCallable, Category = "AnimAgent")
     void ImportGLBAsync(const FString& JobUuid, const FString& GLBFilePath);
+
+    /**
+     * 从 UGC runtime package manifest 加载主资产。
+     * manifest 内的 model 字段为相对 PackageDir 的路径。
+     */
+    UFUNCTION(BlueprintCallable, Category = "AnimAgent")
+    void ImportRuntimeAssetAsync(const FString& PackageId, const FString& ManifestPath);
 
     /**
      * 把已经加载的 mesh spawn 到场景

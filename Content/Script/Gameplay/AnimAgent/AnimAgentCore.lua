@@ -30,6 +30,29 @@ local _client  = nil   -- UAnimGenClient*
 local _import  = nil   -- UAnimImportBridge*  (可选)
 local _initialized = false
 
+local function _packagesRoot()
+    local ok, dir = pcall(function() return UE.UAnimGenClient.GetUGCPackagesRootDir() end)
+    if ok and dir and dir ~= "" then
+        return dir:gsub("\\", "/")
+    end
+    return UE.UKismetSystemLibrary.GetProjectDirectory() .. "Saved/UGC/Packages"
+end
+
+local function _manifestPath(packageID)
+    return string.format("%s/%s/manifest.json", _packagesRoot():gsub("/$", ""), packageID)
+end
+
+local function _readManifest(manifestPath)
+    local f = io.open(manifestPath, "r")
+    if not f then return nil end
+    local content = f:read("*a")
+    f:close()
+    local ok, json = pcall(require, "Gameplay.UGC.json")
+    if not ok or not json then return nil end
+    local okDecode, manifest = pcall(function() return json.decode(content) end)
+    return okDecode and manifest or nil
+end
+
 --============================================================
 -- 初始化
 --============================================================
@@ -79,6 +102,7 @@ function Core:Init(playerController, opts)
     _import = importBridge
 
     Library:Init()
+    self:RehydrateRuntimeAssets()
 
     -- 注：UnLua 的 multicast delegate :Add 要求 self 必须是 UObject，Core 是 Lua table 不行。
     -- 当前 ImportLocalGLB 是同步实现，调用方拿到 uuid 立刻自己处理（见 ImportLocal 函数），
@@ -86,7 +110,7 @@ function Core:Init(playerController, opts)
     -- 后续 Fab 阶段如需异步事件，应让 PlayerController 作为接收 UObject 中转到 Lua。
 
     _initialized = true
-    print(string.format("[AnimAgentCore] 初始化完成（local-import 模式，import_bridge=%s）",
+    print(string.format("[AnimAgentCore] 初始化完成（runtime-package 模式，import_bridge=%s）",
         importBridge and "yes" or "no"))
     return true
 end
@@ -105,26 +129,26 @@ end
 -- 公共 API
 --============================================================
 
---- 从本地 .glb 文件导入（同步流程：拷贝 → 写库 → 注册 → 预加载 mesh）
+--- 从本地文件导入为 UGC runtime package（同步流程：构建 package → 写库 → 注册 → 预加载）
 --- @param filePath string  绝对路径
 --- @param desiredName? string
---- @return string uuid（失败返回 ""）
+--- @return string package_id（失败返回 ""）
 function Core:ImportLocal(filePath, desiredName)
+    return self:ImportPackageFromFile(filePath, desiredName or "", "local", nil)
+end
+
+function Core:ImportPackageFromFile(filePath, desiredName, provider, extra)
     if not self:IsReady() then
-        print("[AnimAgentCore] ImportLocal 失败：未初始化")
+        print("[AnimAgentCore] ImportPackageFromFile 失败：未初始化")
         return ""
     end
     if not filePath or filePath == "" then return "" end
 
-    local uuid = _client:ImportLocalGLB(filePath, desiredName or "")
-    if not uuid or uuid == "" then return "" end
+    local packageID = _client:ImportLocalUGCPackage(filePath, desiredName or "", provider or "local")
+    if not packageID or packageID == "" then return "" end
 
-    -- C++ 已经把 source.glb + meta.json 落在 Saved/AnimAgent/assets/{uuid}/
-    local glbPath = string.format("%sSaved/AnimAgent/assets/%s/source.glb",
-        UE.UKismetSystemLibrary.GetProjectDirectory(), uuid)
-
-    self:_processImportedAsset(uuid, glbPath, desiredName or "")
-    return uuid
+    self:_processRuntimePackage(packageID, _manifestPath(packageID), desiredName or "", provider or "local", extra)
+    return packageID
 end
 
 --- 导出到本地路径
@@ -141,6 +165,7 @@ end
 --- 删除资产（仅 Library / Registry 元数据；不删 Saved 目录文件）
 function Core:RemoveAsset(uuid)
     if not uuid or uuid == "" then return false end
+    Registry:RemovePrefab("pkg:" .. uuid .. ":main")
     Registry:RemovePrefab("dyn:" .. uuid)
     return Library:Remove(uuid)
 end
@@ -149,50 +174,80 @@ end
 -- 内部：导入完成后的统一处理
 --============================================================
 
-function Core:_processImportedAsset(uuid, glbPath, desiredName)
-    -- ① 优先用 desiredName，否则解析 meta.json 取显示名
-    local name = desiredName ~= "" and desiredName or uuid
-    local sourceNote = ""
-    pcall(function()
-        local metaPath = glbPath:gsub("source%.glb$", "meta.json")
-        local f = io.open(metaPath, "r")
-        if f then
-            local content = f:read("*a")
-            f:close()
-            local json = require("Gameplay.UGC.json")
-            local meta = json.decode(content)
-            if meta then
-                if desiredName == "" then name = meta.name or name end
-                sourceNote = meta.source_note or ""
-            end
-        end
-    end)
+function Core:_processRuntimePackage(packageID, manifestPath, desiredName, provider, extra)
+    local manifest = _readManifest(manifestPath) or {}
+    local name = desiredName ~= "" and desiredName or (manifest.name or packageID)
+    local sourceNote = manifest.original_name or manifest.original_path or ""
+    local assetID = manifest.asset_id or "main"
+    local packageDir = manifestPath:gsub("[/\\]manifest%.json$", "")
+    local sourcePath = ""
+    if manifest.model and manifest.model ~= "" then
+        sourcePath = packageDir .. "/" .. tostring(manifest.model):gsub("\\", "/")
+    end
+    extra = extra or {}
 
     -- ② 写入资产库
     Library:Add({
-        uuid       = uuid,
-        name       = name,
-        prompt     = sourceNote,
-        provider   = "local",
-        glb_path   = glbPath,
-        created_at = os.time(),
+        uuid          = packageID, -- 兼容旧调用方
+        package_id    = packageID,
+        asset_id      = assetID,
+        name          = name,
+        prompt        = extra.description or sourceNote,
+        provider      = provider or manifest.provider or "local",
+        manifest_path = manifestPath,
+        model_path    = manifest.model or "",
+        source_path   = sourcePath,
+        thumbnail_path= manifest.thumbnail or "",
+        prefab_id     = "pkg:" .. packageID .. ":" .. assetID,
+        fab_id        = extra.fab_id,
+        tags          = extra.tags or {},
+        created_at    = tonumber(manifest.created_at) or os.time(),
     })
 
-    -- ③ 注册到 UGCPrefabRegistry（出现在 UGC 编辑器的"AI 生成"分类下）
-    Registry:RegisterDynamicGLB({
-        uuid     = uuid,
-        name     = name,
-        glb_path = glbPath,
-        provider = "local",
-        prompt   = sourceNote,
+    -- ③ 注册到 UGCPrefabRegistry（出现在 UGC 编辑器的"UGC 资产"分类下）
+    Registry:RegisterRuntimeAsset({
+        package_id    = packageID,
+        asset_id      = assetID,
+        name          = name,
+        manifest_path = manifestPath,
+        provider      = provider or manifest.provider or "local",
+        prompt        = extra.description or sourceNote,
+        thumbnail_path= manifest.thumbnail or "",
     })
 
-    -- ④ 让 ImportBridge 预加载 mesh（首次放置时无 IO 卡顿）
+    -- ④ 让 ImportBridge 预加载 runtime asset（首次放置时无 IO 卡顿）
     if _import then
-        pcall(function() _import:ImportGLBAsync(uuid, glbPath) end)
+        pcall(function() _import:ImportRuntimeAssetAsync(packageID, manifestPath) end)
     end
 
-    print(string.format("[AnimAgentCore] 资产已就绪 uuid=%s name=%s", uuid, name))
+    print(string.format("[AnimAgentCore] Runtime package 已就绪 package=%s name=%s", packageID, name))
+end
+
+function Core:RehydrateRuntimeAssets()
+    local list = Library:GetAll()
+    for _, item in ipairs(list or {}) do
+        local packageID = item.package_id or item.uuid
+        local manifestPath = item.manifest_path
+        if packageID and packageID ~= "" and manifestPath and manifestPath ~= "" then
+            Registry:RegisterRuntimeAsset({
+                package_id    = packageID,
+                asset_id      = item.asset_id or "main",
+                name          = item.name or packageID,
+                manifest_path = manifestPath,
+                provider      = item.provider or "local",
+                prompt        = item.prompt or "",
+                thumbnail_path= item.thumbnail_path or "",
+            })
+        elseif item.glb_path and item.glb_path ~= "" then
+            Registry:RegisterDynamicGLB({
+                uuid     = item.uuid,
+                name     = item.name,
+                glb_path = item.glb_path,
+                provider = item.provider or "legacy",
+                prompt   = item.prompt or "",
+            })
+        end
+    end
 end
 
 return Core

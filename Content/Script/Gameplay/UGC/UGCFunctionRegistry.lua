@@ -63,6 +63,7 @@ local function _findLocalAnimAsset(uuid, name)
 
     local normalizedUuid = tostring(uuid or "")
     normalizedUuid = normalizedUuid:gsub("^dyn:", "")
+    normalizedUuid = normalizedUuid:gsub("^pkg:", ""):gsub(":main$", "")
     if normalizedUuid ~= "" then
         local hit = Library:Find(normalizedUuid)
         if hit then return hit end
@@ -507,8 +508,9 @@ function Registry:RegisterAll()
             if not bridge then return false, err end
 
             local item = _findLocalAnimAsset(p.uuid, p.name)
-            if not item or not item.glb_path or item.glb_path == "" then
-                return false, "未找到可发布的本地 GLB 资产"
+            local uploadPath = item and (item.glb_path or item.source_path or item.manifest_path) or ""
+            if not item or uploadPath == "" then
+                return false, "未找到可发布的本地 UGC 资产"
             end
 
             local publishName = tostring(p.name or "")
@@ -520,9 +522,9 @@ function Registry:RegisterAll()
             local tags = _tagsToCsv(p.tags)
             if tags == "" then tags = _tagsToCsv(item.tags) end
 
-            bridge:UploadModelSimple(publishName, item.glb_path, desc, tags)
+            bridge:UploadModelSimple(publishName, uploadPath, desc, tags)
             return true, string.format("已提交 Fab 发布：%s path=%s（异步完成看 LogFabClient / OnUploadCompleted）",
-                publishName, tostring(item.glb_path))
+                publishName, tostring(uploadPath))
         end
     })
 

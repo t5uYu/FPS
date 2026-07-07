@@ -1,10 +1,9 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 // AnimGenClient.h — 本地资产客户端组件，挂在 PlayerController 上
 //
-// Phase L1（本地导入）：
-// - 接收"导入本地 .glb"请求
-// - 拷贝到 Saved/AnimAgent/assets/{uuid}/source.glb
-// - 委托 UAnimImportBridge 加载为 UStaticMesh
+// 本地 UGC 资产客户端组件：
+// - 接收本地 GLB/GLTF/ZIP/UGC package 导入请求
+// - 构建 Saved/UGC/Packages/{package_id}/manifest.json + payload
 // - 通过事件广播给 Lua / UI
 //
 // 后续 Phase F（Fab 平台）会在此组件加 Fab REST 客户端。
@@ -19,7 +18,7 @@
 class UAnimImportBridge;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-    FOnAnimAssetImported, const FString&, AssetUuid, const FString&, GLBPath);
+    FOnAnimAssetImported, const FString&, AssetUuid, const FString&, AssetPath);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
     FOnAnimAssetImportFailed, const FString&, AssetUuid, const FString&, ErrorMessage);
@@ -47,8 +46,19 @@ public:
     //--------------------------------------------------------------
 
     /**
-     * 从本地 .glb 文件导入资产
-     * 流程：拷贝到 Saved/AnimAgent/assets/{uuid}/source.glb → 广播事件
+     * 从本地文件构建运行时 UGC package。
+     * 支持 .glb、.gltf、.zip、.ugcpkg；返回 package_id，manifest 位于
+     * Saved/UGC/Packages/{package_id}/manifest.json。
+     */
+    UFUNCTION(BlueprintCallable, Category = "AnimAgent")
+    FString ImportLocalUGCPackage(const FString& SourceFilePath, const FString& DesiredName, const FString& Provider);
+
+    /** 取运行时 UGC package 根目录（Saved/UGC/Packages/） */
+    UFUNCTION(BlueprintCallable, Category = "AnimAgent")
+    static FString GetUGCPackagesRootDir();
+
+    /**
+     * 兼容入口：从本地 .glb 文件导入资产，内部转为 UGC runtime package。
      * @param SourceFilePath 玩家选择的本地绝对路径
      * @param DesiredName    资产显示名（空时取原文件名）
      * @return 新生成的资产 uuid，失败返回空串
@@ -57,7 +67,7 @@ public:
     FString ImportLocalGLB(const FString& SourceFilePath, const FString& DesiredName);
 
     /**
-     * 把已导入的资产导出到指定文件
+     * 兼容入口：把旧 AnimAgent .glb 资产导出到指定文件。
      * 拷贝 source.glb 到目标路径，并在同目录落 .meta.json（来源/名称）
      * @return 是否成功
      */

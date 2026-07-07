@@ -3,7 +3,7 @@
     本地"我的资产"索引 —— Phase 1 极简实现
 
     职责：
-    - 保存玩家本地生成 / 导入的 3D 资产元数据
+    - 保存玩家本地生成 / 导入的 UGC runtime package 元数据
     - 持久化到 Saved/AnimAgent/library.json
     - 提供 Add / Remove / Find / List / Save / Load API
 
@@ -12,8 +12,11 @@
         uuid       = "xxx-xxx-xxx",          -- 同 AnimGenJob.JobUuid
         name       = "fire sword",            -- 玩家可改写
         prompt     = "a glowing fire sword",
-        provider   = "meshy" | "tripo" | "mock" | "import",
-        glb_path   = "Saved/AnimAgent/assets/{uuid}/source.glb",
+        provider   = "meshy" | "fab" | "local" | "legacy",
+        package_id = "xxx-xxx-xxx",          -- 新 runtime package id
+        manifest_path = "Saved/UGC/Packages/{package_id}/manifest.json",
+        source_path   = "Saved/UGC/Packages/{package_id}/payload/model.glb",
+        glb_path   = "Saved/AnimAgent/assets/{uuid}/source.glb", -- legacy
         thumb_path = "Saved/AnimAgent/assets/{uuid}/thumb.png",  -- 可选
         created_at = 1701234567,              -- unix timestamp
         tags       = { "weapon", "fire" },    -- 可选
@@ -22,7 +25,7 @@
     用法：
         local Library = require("Gameplay.AnimAgent.AnimAssetLibrary")
         Library:Init()
-        Library:Add({ uuid=..., name=..., prompt=..., glb_path=... })
+        Library:Add({ uuid=..., package_id=..., name=..., prompt=..., manifest_path=... })
         local list = Library:GetAll()
 ]]
 

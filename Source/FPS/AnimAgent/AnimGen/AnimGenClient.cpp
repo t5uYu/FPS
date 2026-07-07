@@ -2,9 +2,11 @@
 
 #include "AnimGenClient.h"
 
+#include "Misc/DateTime.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
+#include "Misc/SecureHash.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/FileManager.h"
 #include "Dom/JsonObject.h"
@@ -24,12 +26,17 @@ UAnimGenClient::UAnimGenClient()
 void UAnimGenClient::BeginPlay()
 {
     Super::BeginPlay();
-    UE_LOG(LogAnimGenClient, Log, TEXT("AnimGenClient ready (local-import mode)"));
+    UE_LOG(LogAnimGenClient, Log, TEXT("AnimGenClient ready (runtime-package mode)"));
 }
 
 FString UAnimGenClient::GetAssetsCacheDir()
 {
     return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AnimAgent"), TEXT("assets"));
+}
+
+FString UAnimGenClient::GetUGCPackagesRootDir()
+{
+    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UGC"), TEXT("Packages"));
 }
 
 namespace
@@ -46,6 +53,109 @@ namespace
         }
         return nullptr;
     }
+}
+
+FString UAnimGenClient::ImportLocalUGCPackage(const FString& SourceFilePath, const FString& DesiredName, const FString& Provider)
+{
+    if (SourceFilePath.IsEmpty() || !FPaths::FileExists(SourceFilePath))
+    {
+        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalUGCPackage: 源文件不存在: %s"), *SourceFilePath);
+        OnAssetImportFailed.Broadcast(FString(), TEXT("源文件不存在"));
+        return FString();
+    }
+
+    const FString Extension = FPaths::GetExtension(SourceFilePath, /*bIncludeDot*/false).ToLower();
+    if (Extension != TEXT("glb") && Extension != TEXT("gltf") && Extension != TEXT("zip") && Extension != TEXT("ugcpkg"))
+    {
+        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalUGCPackage: 不支持的格式: %s"), *Extension);
+        OnAssetImportFailed.Broadcast(FString(), TEXT("仅支持 .glb/.gltf/.zip/.ugcpkg"));
+        return FString();
+    }
+
+    const FString PackageId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+    const FString PackageDir = FPaths::Combine(GetUGCPackagesRootDir(), PackageId);
+    const FString PayloadDir = FPaths::Combine(PackageDir, TEXT("payload"));
+    const FString ManifestPath = FPaths::Combine(PackageDir, TEXT("manifest.json"));
+
+    IFileManager::Get().MakeDirectory(*PayloadDir, /*Tree*/true);
+
+    const FString OriginalName = FPaths::GetBaseFilename(SourceFilePath);
+    const FString DisplayName = DesiredName.IsEmpty() ? OriginalName : DesiredName;
+    const FString CleanFilename = FPaths::GetCleanFilename(SourceFilePath);
+    FString ModelRelativePath;
+
+    if (Extension == TEXT("gltf"))
+    {
+        const FString SourceDir = FPaths::GetPath(SourceFilePath);
+        IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+        if (!PlatformFile.CopyDirectoryTree(*PayloadDir, *SourceDir, /*bOverwriteAllExisting*/true))
+        {
+            UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalUGCPackage: 拷贝 glTF 目录失败 %s -> %s"),
+                *SourceDir, *PayloadDir);
+            OnAssetImportFailed.Broadcast(PackageId, TEXT("拷贝 glTF 目录失败"));
+            return FString();
+        }
+        ModelRelativePath = FPaths::Combine(TEXT("payload"), CleanFilename);
+    }
+    else
+    {
+        const FString TargetPath = FPaths::Combine(PayloadDir, CleanFilename);
+        if (IFileManager::Get().Copy(*TargetPath, *SourceFilePath) != COPY_OK)
+        {
+            UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalUGCPackage: 拷贝失败 %s -> %s"),
+                *SourceFilePath, *TargetPath);
+            OnAssetImportFailed.Broadcast(PackageId, TEXT("拷贝失败"));
+            return FString();
+        }
+        ModelRelativePath = FPaths::Combine(TEXT("payload"), CleanFilename);
+    }
+
+    const int64 NowSeconds = FDateTime::UtcNow().ToUnixTimestamp();
+    const FString Hash = LexToString(FMD5Hash::HashFile(*SourceFilePath));
+
+    FString SourceType = TEXT("unknown");
+    if (Extension == TEXT("glb")) SourceType = TEXT("glb");
+    else if (Extension == TEXT("gltf")) SourceType = TEXT("gltf");
+    else if (Extension == TEXT("zip")) SourceType = TEXT("zip");
+    else if (Extension == TEXT("ugcpkg")) SourceType = TEXT("ugcpkg");
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("schema"), TEXT("ugc.runtime_package.v1"));
+    Root->SetStringField(TEXT("package_id"), PackageId);
+    Root->SetStringField(TEXT("asset_id"), TEXT("main"));
+    Root->SetStringField(TEXT("name"), DisplayName);
+    Root->SetStringField(TEXT("source_type"), SourceType);
+    Root->SetStringField(TEXT("provider"), Provider.IsEmpty() ? TEXT("local") : Provider);
+    Root->SetStringField(TEXT("model"), ModelRelativePath.Replace(TEXT("\\"), TEXT("/")));
+    Root->SetStringField(TEXT("thumbnail"), TEXT(""));
+    Root->SetStringField(TEXT("original_name"), OriginalName);
+    Root->SetStringField(TEXT("original_path"), SourceFilePath);
+    Root->SetStringField(TEXT("content_hash"), Hash);
+    Root->SetNumberField(TEXT("created_at"), (double)NowSeconds);
+
+    TArray<TSharedPtr<FJsonValue>> Assets;
+    TSharedRef<FJsonObject> MainAsset = MakeShared<FJsonObject>();
+    MainAsset->SetStringField(TEXT("asset_id"), TEXT("main"));
+    MainAsset->SetStringField(TEXT("kind"), TEXT("static_mesh"));
+    MainAsset->SetStringField(TEXT("model"), ModelRelativePath.Replace(TEXT("\\"), TEXT("/")));
+    Assets.Add(MakeShared<FJsonValueObject>(MainAsset));
+    Root->SetArrayField(TEXT("assets"), Assets);
+
+    FString ManifestString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ManifestString);
+    FJsonSerializer::Serialize(Root, Writer);
+    if (!FFileHelper::SaveStringToFile(ManifestString, *ManifestPath))
+    {
+        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalUGCPackage: 写 manifest 失败 %s"), *ManifestPath);
+        OnAssetImportFailed.Broadcast(PackageId, TEXT("写 manifest 失败"));
+        return FString();
+    }
+
+    UE_LOG(LogAnimGenClient, Log, TEXT("ImportLocalUGCPackage ok: package=%s name=%s manifest=%s"),
+        *PackageId, *DisplayName, *ManifestPath);
+
+    OnAssetImported.Broadcast(PackageId, ManifestPath);
+    return PackageId;
 }
 
 TArray<FString> UAnimGenClient::OpenFileDialog(
@@ -100,58 +210,7 @@ FString UAnimGenClient::SaveFileDialog(
 
 FString UAnimGenClient::ImportLocalGLB(const FString& SourceFilePath, const FString& DesiredName)
 {
-    if (SourceFilePath.IsEmpty() || !FPaths::FileExists(SourceFilePath))
-    {
-        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalGLB: 源文件不存在: %s"), *SourceFilePath);
-        OnAssetImportFailed.Broadcast(FString(), TEXT("源文件不存在"));
-        return FString();
-    }
-
-    const FString Extension = FPaths::GetExtension(SourceFilePath, /*bIncludeDot*/false).ToLower();
-    if (Extension != TEXT("glb"))
-    {
-        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalGLB: 仅支持 .glb，当前: %s"), *Extension);
-        OnAssetImportFailed.Broadcast(FString(), TEXT("仅支持 .glb 文件"));
-        return FString();
-    }
-
-    const FString Uuid = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
-    const FString TargetDir = FPaths::Combine(GetAssetsCacheDir(), Uuid);
-    const FString TargetPath = FPaths::Combine(TargetDir, TEXT("source.glb"));
-
-    IFileManager::Get().MakeDirectory(*TargetDir, /*Tree*/true);
-
-    if (IFileManager::Get().Copy(*TargetPath, *SourceFilePath) != COPY_OK)
-    {
-        UE_LOG(LogAnimGenClient, Error, TEXT("ImportLocalGLB: 拷贝失败 %s -> %s"),
-            *SourceFilePath, *TargetPath);
-        OnAssetImportFailed.Broadcast(Uuid, TEXT("拷贝失败"));
-        return FString();
-    }
-
-    // 落 meta.json（玩家把 Saved 目录拷走也能识别来源）
-    const FString OriginalName = FPaths::GetBaseFilename(SourceFilePath);
-    const FString DisplayName = DesiredName.IsEmpty() ? OriginalName : DesiredName;
-    const int64 NowSeconds = FDateTime::UtcNow().ToUnixTimestamp();
-
-    TSharedRef<FJsonObject> Meta = MakeShared<FJsonObject>();
-    Meta->SetStringField(TEXT("uuid"), Uuid);
-    Meta->SetStringField(TEXT("name"), DisplayName);
-    Meta->SetStringField(TEXT("source"), TEXT("Local"));
-    Meta->SetStringField(TEXT("source_note"), OriginalName);
-    Meta->SetStringField(TEXT("original_path"), SourceFilePath);
-    Meta->SetNumberField(TEXT("created_at"), (double)NowSeconds);
-
-    FString MetaStr;
-    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&MetaStr);
-    FJsonSerializer::Serialize(Meta, Writer);
-    FFileHelper::SaveStringToFile(MetaStr, *FPaths::Combine(TargetDir, TEXT("meta.json")));
-
-    UE_LOG(LogAnimGenClient, Log, TEXT("ImportLocalGLB ok: uuid=%s name=%s -> %s"),
-        *Uuid, *DisplayName, *TargetPath);
-
-    OnAssetImported.Broadcast(Uuid, TargetPath);
-    return Uuid;
+    return ImportLocalUGCPackage(SourceFilePath, DesiredName, TEXT("local"));
 }
 
 bool UAnimGenClient::ExportLocalGLB(const FString& AssetUuid, const FString& TargetFilePath)

@@ -312,11 +312,19 @@ function EditorCore:Init(playerController)
 
     SceneData:Init(_bridge)
     PrefabRegistry:LoadDynamic(_bridge)   -- 扫描 Placeables 目录 + 加载自定义 JSON
+    pcall(function()
+        local AnimCore = require("Gameplay.AnimAgent.AnimAgentCore")
+        AnimCore:Init(playerController)
+        AnimCore:RehydrateRuntimeAssets()
+    end)
 
-    -- AnimAgent dyn 资产：所有 SpawnPlaceable 后自动注入 mesh
-    -- 这样 Save/Load/Undo/Redo 全流程通用，SceneData 无需感知 dyn 细节
+    -- UGC runtime 资产：所有 SpawnPlaceable 后自动注入 mesh/material
+    -- 这样 Save/Load/Undo/Redo 全流程通用，SceneData 无需感知 runtime package 细节
     SceneData:SetActorCreatedHook(function(actor, prefabName)
-        if PrefabRegistry.GetKind(prefabName) == "dynamic_glb" then
+        local kind = PrefabRegistry.GetKind(prefabName)
+        if kind == "runtime_asset" then
+            EditorCore:_InjectRuntimeAsset(actor, prefabName)
+        elseif kind == "dynamic_glb" then
             EditorCore:_InjectDynMesh(actor, prefabName)
         end
     end)
@@ -447,8 +455,11 @@ function EditorCore:SelectPrefab(prefabName)
     local spawnLoc = UE.FVector(0, 0, -99999)
     _ghostActor = _bridge:SpawnPlaceable(path, spawnLoc, UE.FRotator(0, 0, 0))
 
-    -- dyn 资产：spawn 出来的是空壳 AAnimAgentDynamicPlaceable，立即注入 mesh
-    if _ghostActor and PrefabRegistry.GetKind(prefabName) == "dynamic_glb" then
+    -- runtime/dyn 资产：spawn 出来的是空壳 AAnimAgentDynamicPlaceable，立即注入 mesh
+    local kind = PrefabRegistry.GetKind(prefabName)
+    if _ghostActor and kind == "runtime_asset" then
+        self:_InjectRuntimeAsset(_ghostActor, prefabName)
+    elseif _ghostActor and kind == "dynamic_glb" then
         self:_InjectDynMesh(_ghostActor, prefabName)
     end
 
@@ -532,9 +543,11 @@ function EditorCore:OnViewportClick(screenX, screenY)
         local prefabName = _pendingPrefab
         self:_destroyGhost()   -- 先销毁 Ghost，再放真实 Actor
 
-        local isDyn = (PrefabRegistry.GetKind(prefabName) == "dynamic_glb")
+        local prefabKind = PrefabRegistry.GetKind(prefabName)
+        local isRuntime = (prefabKind == "runtime_asset")
+        local isDyn = (prefabKind == "dynamic_glb")
 
-        -- SceneData:CreateActor 内部已通过 hook 自动注入 dyn mesh
+        -- SceneData:CreateActor 内部已通过 hook 自动注入 runtime/dyn mesh
         local sceneID, actor = SceneData:CreateActor(prefabName, loc)
         if actor then
             self:SelectByID(sceneID)
@@ -545,7 +558,9 @@ function EditorCore:OnViewportClick(screenX, screenY)
         if continuePath then
             local spawnLoc = UE.FVector(0, 0, -99999)
             _ghostActor = _bridge:SpawnPlaceable(continuePath, spawnLoc, UE.FRotator(0, 0, 0))
-            if _ghostActor and isDyn then
+            if _ghostActor and isRuntime then
+                self:_InjectRuntimeAsset(_ghostActor, prefabName)
+            elseif _ghostActor and isDyn then
                 self:_InjectDynMesh(_ghostActor, prefabName)
             end
             if _ghostActor then
@@ -894,9 +909,9 @@ function EditorCore:UpdateGizmoScale()
 end
 
 --============================================================
--- AnimAgent 动态 GLB 资产支持
+-- UGC runtime / AnimAgent 动态资产支持
 --
--- 设计：dyn 资产走和其他 placeable 完全一致的 SpawnPlaceable + SceneData 流程，
+-- 设计：runtime 资产走和其他 placeable 完全一致的 SpawnPlaceable + SceneData 流程，
 -- 区别仅在 spawn 出来后立即向 AAnimAgentDynamicPlaceable 注入实际的 UStaticMesh。
 --============================================================
 
@@ -909,6 +924,33 @@ local function _getImportBridge()
     local importBridge = nil
     pcall(function() importBridge = pc:GetComponentByClass(UE.UAnimImportBridge) end)
     return importBridge
+end
+
+--- 给一个刚 spawn 出来的 AAnimAgentDynamicPlaceable 注入 runtime package asset
+function EditorCore:_InjectRuntimeAsset(actor, prefabName)
+    if not actor then return end
+    local asset = PrefabRegistry.GetRuntimeAsset(prefabName)
+    if not asset then return end
+
+    local importBridge = _getImportBridge()
+    if not importBridge then
+        print("[UGCEditorCore] _InjectRuntimeAsset: 未找到 UAnimImportBridge")
+        return
+    end
+
+    local packageID = asset.package_id
+    local mesh = nil
+    pcall(function() mesh = importBridge:FindCachedMesh(packageID) end)
+    if not mesh then
+        pcall(function() importBridge:ImportRuntimeAssetAsync(packageID, asset.manifest_path) end)
+        pcall(function() mesh = importBridge:FindCachedMesh(packageID) end)
+    end
+    if not mesh then
+        print("[UGCEditorCore] _InjectRuntimeAsset: asset 加载失败 package=" .. tostring(packageID))
+        return
+    end
+
+    pcall(function() actor:SetRuntimeAsset(mesh, packageID, asset.asset_id or "main") end)
 end
 
 --- 给一个刚 spawn 出来的 AAnimAgentDynamicPlaceable 注入 mesh
