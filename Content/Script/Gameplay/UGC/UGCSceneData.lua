@@ -544,6 +544,43 @@ function SceneData:Subscribe(eventName, listener)
     _listeners[eventName][#_listeners[eventName] + 1] = listener
 end
 
+--- T10：取消订阅。UI 的 ViewModel 在 Destruct 时必须解绑，否则关闭的界面会被
+--- 文档事件一直引用（dead UObject 无法被回收）。
+function SceneData:Unsubscribe(eventName, listener)
+    local list = _listeners[eventName]
+    if not list or not listener then return false end
+    for i = #list, 1, -1 do
+        if list[i] == listener then
+            table.remove(list, i)
+            return true
+        end
+    end
+    return false
+end
+
+--- 把某个 listener 从所有事件上摘掉（防御性兜底，正常路径用 Unsubscribe）
+function SceneData:UnsubscribeAll(listener)
+    if not listener then return 0 end
+    local removed = 0
+    for _, list in pairs(_listeners) do
+        for i = #list, 1, -1 do
+            if list[i] == listener then
+                table.remove(list, i)
+                removed = removed + 1
+            end
+        end
+    end
+    return removed
+end
+
+--- 监听者数量（回归测试与泄漏排查用）
+function SceneData:ListenerCount(eventName)
+    if eventName then return #(_listeners[eventName] or {}) end
+    local total = 0
+    for _, list in pairs(_listeners) do total = total + #list end
+    return total
+end
+
 function SceneData:RegisterExternalAdapter(kind, restorer, destroyer)
     if not kind or type(restorer) ~= "function" then return false end
     _externalRestorers[kind] = restorer

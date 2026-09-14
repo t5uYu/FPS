@@ -32,6 +32,10 @@ end
 
 local M = UnLua.Class()
 
+-- T10：编辑器共享 ViewModel 与订阅句柄（Construct 里绑定，Destruct 里解绑）
+local _viewModel        = nil
+local _viewSubscription = nil
+
 local LOG_TAG = "[System.UI.UGC.WBP_UGCEditor]"
 
 local function Log(msg)
@@ -172,20 +176,9 @@ function M:Construct()
 
     self:BuildPrefabList()
 
-    -- 监听状态变化（刷新试玩按钮文字）
-    EditorCore:OnStateChanged(function(state)
-        self:RefreshPlayButton(state)
-    end)
-
-    -- 监听选中变化（刷新 Transform 面板 + Actor 蓝图按钮可见性）
-    EditorCore:OnSelectionChanged(function(sceneID)
-        if sceneID then
-            self:RefreshTransformInputs()
-        else
-            self:ClearTransformInputs()
-        end
-        self:RefreshActorBlueprintBtn(sceneID)
-    end)
+    -- T10：状态与选中的刷新改为 ViewModel 通道驱动（inspector / toolbar），
+    -- 订阅在 Destruct 里解绑 —— 不再用 EditorCore 的单槽回调（关闭后会被一直引用）。
+    self:BindViewModel()
 
     -- Actor 蓝图按钮初始隐藏（无选中时不显示）
     self:RefreshActorBlueprintBtn(nil)
@@ -197,6 +190,45 @@ function M:Construct()
 
 
     Log("UI 构建完成")
+end
+
+--============================================================
+-- T10：ViewModel 绑定 / 解绑
+--============================================================
+
+--- 订阅编辑器共享 ViewModel：inspector（选中/属性/Transform 变化）与 toolbar（试玩按钮）
+function M:BindViewModel()
+    if _viewSubscription then return _viewModel end
+    _viewModel = EditorCore:GetViewModel()
+    if not _viewModel then return nil end
+
+    _viewModel:BindView(self)
+    _viewSubscription = _viewModel:Subscribe(function(channel, payload)
+        if channel == "inspector" then
+            -- 文档事件（选中变化 / 属性变化 / Transform 变化 / 实体删除）都走这里
+            if not self.w_input_X then return end   -- 控件已被销毁时静默跳过
+            local sceneID = payload and payload.sceneID or EditorCore:GetSelectedID()
+            if sceneID then
+                self:RefreshTransformInputs()
+            else
+                self:ClearTransformInputs()
+            end
+            self:RefreshActorBlueprintBtn(sceneID)
+        elseif channel == "toolbar" then
+            self:RefreshPlayButton(payload and payload.state or EditorCore:GetState())
+        end
+    end)
+    return _viewModel
+end
+
+--- 界面销毁：解绑订阅与视图弱引用（T10）
+function M:Destruct()
+    if _viewModel and _viewSubscription then
+        _viewModel:Unsubscribe(_viewSubscription)
+    end
+    if _viewModel then _viewModel:UnbindView() end
+    _viewSubscription = nil
+    _viewModel = nil
 end
 
 --============================================================

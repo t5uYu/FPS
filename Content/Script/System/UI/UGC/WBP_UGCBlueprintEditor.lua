@@ -52,6 +52,11 @@ local _dragStartNodePos = nil
 local _pendingPin       = nil   -- {nodeID, pinName, isOutput}
 local _isDirtyWires     = false
 
+-- T10：编辑器共享 ViewModel 与订阅句柄。连线重绘由 ViewModel 的 "wires" 通道（文档事件）驱动，
+-- Destruct 里必须解绑，否则界面关闭后仍会被文档事件引用（dead UObject 无法回收）。
+local _viewModel        = nil
+local _viewSubscription = nil
+
 local NODE_CLASS_PATH    = "/Game/_UGC/UI/WBP_UGCNode.WBP_UGCNode_C"
 local NODE_LIB_BTN_PATH  = "/Game/_UGC/UI/WBP_UGCNodeLibBtn.WBP_UGCNodeLibBtn_C"
 local _nodeClass         = nil
@@ -113,7 +118,46 @@ function M:Construct()
     bind("w_btn_close",   M.OnClickClose)
 
     self:SetStatus("关卡蓝图 — 从左侧选择节点类型放置")
+    self:BindViewModel()
     Log("构建完成")
+end
+
+--============================================================
+-- T10：ViewModel 绑定 / 解绑
+--============================================================
+
+--- 拉取编辑器共享 ViewModel 并订阅 "wires" 通道（幂等）
+function M:BindViewModel()
+    if _viewSubscription then return _viewModel end
+    local ok, EditorCore = pcall(require, "Gameplay.UGC.UGCEditorCore")
+    if not ok or not EditorCore or not EditorCore.GetViewModel then return nil end
+    _viewModel = EditorCore:GetViewModel()
+    if not _viewModel then return nil end
+
+    _viewModel:BindView(self)
+    _viewSubscription = _viewModel:Subscribe(function(channel)
+        -- 文档变化（AI 放置/删除、撤销重做恢复图程序、加载项目…）→ 连线需要重绘，
+        -- 不需要 Tick 轮询也能刷新。
+        if channel == "wires" then _isDirtyWires = true end
+    end)
+    return _viewModel
+end
+
+--- Tick 用：现在是否真的需要重绘（拖连线必须逐帧，其余情况由事件标脏）
+function M:NeedsWireRefresh()
+    return _isDirtyWires or _pendingPin ~= nil
+end
+
+--- 界面销毁：解绑订阅与视图弱引用（T10）
+function M:Destruct()
+    if _viewModel and _viewSubscription then
+        _viewModel:Unsubscribe(_viewSubscription)
+    end
+    if _viewModel then _viewModel:UnbindView() end
+    _viewSubscription = nil
+    _viewModel        = nil
+    _pendingPin       = nil
+    _isDirtyWires     = false
 end
 
 --============================================================

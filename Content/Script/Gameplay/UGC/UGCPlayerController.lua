@@ -43,6 +43,8 @@ end
 function M:ReceiveEndPlay()
     ProgramRunner:CancelAllTasks()
     LLMGateway:Shutdown()
+    -- T10：先释放 UI ViewModel（解绑文档事件 + 视图弱引用），再关掉 SceneData
+    EditorCore:ReleaseViewModel()
     require("Gameplay.UGC.UGCSceneData"):Shutdown()
     Base.ReceiveEndPlay(self)
 end
@@ -77,7 +79,7 @@ function M:EditorClick()
     if not ok then return end
 
     EditorCore:OnViewportClick(x, y)
-    -- Transform 面板刷新由 EditorCore:OnSelectionChanged 回调驱动
+    -- Transform 面板刷新由 EditorCore 的 ViewModel "inspector" 通道驱动（T10）
 end
 
 -- 鼠标上一帧状态（用于检测按下/松开的边沿）
@@ -157,8 +159,11 @@ function M:ReceiveTick(deltaTime)
     -- 自动保存调度（T14）：绑定过项目后按 interval / minInterval 节流写盘，未绑定时直接返回
     Persistence:Tick(deltaTime)
 
-    -- 蓝图编辑器：连线更新（节点拖拽已改为节点 Widget 自管理，Tick 只负责刷新连线）
-    if _bpEditor then
+    -- 蓝图编辑器：连线重绘。
+    -- T10：重绘的触发源是 ViewModel 的 "wires" 通道（文档事件驱动），Tick 只做两件事：
+    --   1) 先问界面"现在需要重绘吗"（正在拖连线 / 事件标脏），不需要就直接跳过，连鼠标位置都不采样；
+    --   2) 需要时才采样鼠标位置并重绘（拖拽跟随必须逐帧，这是"必要的输入采样"）。
+    if _bpEditor and _bpEditor.NeedsWireRefresh and _bpEditor:NeedsWireRefresh() then
         local ok, x, y = self:GetMousePosition()
         if ok then
             _bpEditor:UpdateWires(x, y)

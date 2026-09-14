@@ -15,6 +15,7 @@ local UIManager       = require("Gameplay.Core.UIManager")
 local PrefabRegistry  = require("Gameplay.UGC.UGCPrefabRegistry")
 local SceneData       = require("Gameplay.UGC.UGCSceneData")
 local Log             = require("Gameplay.UGC.UGCLog")
+local ViewModel       = require("Gameplay.UGC.UGCViewModel")
 
 local EditorCore = {}
 EditorCore.__index = EditorCore
@@ -31,8 +32,9 @@ local _currentState    = State.Idle
 local _selectedID      = nil   -- 当前选中的 SceneID
 local _pendingPrefab   = nil   -- 待放置的预制体名，nil=选择模式
 local _ghostActor      = nil   -- 跟随鼠标的预览 Actor
-local _onStateChanged     = nil   -- 外部监听回调
-local _onSelectionChanged = nil   -- 选中变化回调（供 UI 刷新 Transform 面板）
+local _onStateChanged     = nil   -- 外部监听回调（@deprecated 见 OnStateChanged）
+local _onSelectionChanged = nil   -- 选中变化回调（@deprecated 见 OnSelectionChanged）
+local _viewModel          = nil   -- T10：编辑器 UI 的共享 ViewModel（惰性创建）
 
 -- 网格对齐状态
 local _snapEnabled  = true     -- 是否开启网格对齐
@@ -390,6 +392,7 @@ function EditorCore:EnterEditMode()
     -- 显示所有 TriggerZone 的编辑模式可视化方块
     setAllTriggerZoneDebugVisible(true)
 
+    if _viewModel then _viewModel:MarkDirty("toolbar", { state = State.Edit }) end
     if _onStateChanged then _onStateChanged(State.Edit) end
     Log.Info("editor_state", { state = State.Edit })
 end
@@ -428,6 +431,7 @@ function EditorCore:EnterPlayMode()
     ProgramRunner:CancelAllTasks()
     ProgramRunner:TriggerGameStart()
 
+    if _viewModel then _viewModel:MarkDirty("toolbar", { state = State.Play }) end
     if _onStateChanged then _onStateChanged(State.Play) end
     Log.Info("editor_state", { state = State.Play })
     return true
@@ -441,15 +445,37 @@ function EditorCore:ToggleEditMode()
     end
 end
 
---- 注册状态切换监听（供 WBP_UGCEditor 按钮刷新用）
+--- @deprecated T10 起界面请用 GetViewModel():Subscribe()（通道化刷新）。
+--- 本函数是单槽语义：后注册者会覆盖先注册者，且没有解绑入口 —— 界面关闭后回调里的界面引用
+--- 会一直留着。保留只是为了兼容可能的外部调用点，仓库内已无调用者。
 function EditorCore:OnStateChanged(callback)
     _onStateChanged = callback
 end
 
---- 注册选中变化监听（供 WBP_UGCEditor 刷新 Transform 面板用）
---- callback(sceneID)  sceneID=nil 表示取消选中
+--- @deprecated T10 起界面请用 GetViewModel():Subscribe()（见 OnStateChanged 的说明）
 function EditorCore:OnSelectionChanged(callback)
     _onSelectionChanged = callback
+end
+
+--============================================================
+-- T10：共享 ViewModel
+--============================================================
+
+--- 编辑器 UI 的共享 ViewModel（惰性创建并绑定 SceneData 事件）。
+--- 界面在 Construct 里 BindView + Subscribe，在 Destruct 里 Unsubscribe + UnbindView。
+function EditorCore:GetViewModel()
+    if _viewModel and not _viewModel:IsDestroyed() then return _viewModel end
+    _viewModel = ViewModel.New("ugc_editor")
+    _viewModel:AttachSceneData(SceneData)
+    return _viewModel
+end
+
+--- 释放 ViewModel（PC EndPlay 调用）：解掉 SceneData 监听与视图引用
+function EditorCore:ReleaseViewModel()
+    if not _viewModel then return false end
+    _viewModel:Destruct()
+    _viewModel = nil
+    return true
 end
 
 --============================================================
@@ -649,6 +675,7 @@ function EditorCore:SelectByID(sceneID)
         updateGizmoTransform(loc.X, loc.Y, loc.Z)
     end
 
+    if _viewModel then _viewModel:MarkDirty("inspector", { sceneID = sceneID }) end
     if _onSelectionChanged then _onSelectionChanged(sceneID) end
     Log.Debug("editor_selection", { entity = sceneID })
 end
@@ -663,6 +690,7 @@ function EditorCore:ClearSelection()
     end
     -- 销毁 Gizmo 箭头（替代旧的 ClearDebugAxes）
     destroyGizmo()
+    if _viewModel then _viewModel:MarkDirty("inspector", { sceneID = nil }) end
     if _onSelectionChanged then _onSelectionChanged(nil) end
 end
 
