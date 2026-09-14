@@ -16,3 +16,12 @@ DerivedDataCache/
 /Output/docx_builder
 *.docx
 /Plugins/UnLua/Source
+
+# Keep the project knowledge base maintained for Codex/developers.
+!PROJECT_INDEX.md
+!docs/
+!docs/knowledge/
+!docs/knowledge/*.md
+!docs/knowledge/generated/
+!docs/knowledge/generated/*.md
+!docs/knowledge/generated/*.json
