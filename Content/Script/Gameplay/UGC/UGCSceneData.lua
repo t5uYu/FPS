@@ -16,6 +16,7 @@ local Log = require("Gameplay.UGC.UGCLog")
 local Document = require("Gameplay.UGC.UGCDocument")
 local CommandBus = require("Gameplay.UGC.UGCCommandBus")
 local WorldProjection = require("Gameplay.UGC.UGCWorldProjection")
+local PropertySchema = require("Gameplay.UGC.UGCPropertySchema")
 
 local SceneData = {}
 SceneData.__index = SceneData
@@ -86,6 +87,7 @@ local function actorEntry(record)
         metadata = copy(record.metadata),
         tags = copy(record.tags),
         properties = copy(record.properties),
+        parentId = record.parentId,
         transform = copy(record.transform),
     }
 end
@@ -231,6 +233,14 @@ local function registerHandlers()
                 _document:CreateGroup(groupId)
                 _document:AddToGroup(groupId, record.sceneID)
             end
+            -- T8：撤销删除时把当初被上移的子节点挂回来；只处理仍指向祖父的那些，
+            -- 不覆盖用户在删除之后自己做过的层级调整。
+            for _, childID in ipairs(command.children or {}) do
+                local child = _document:GetEntity(tonumber(childID))
+                if child and tonumber(child.parentId) == tonumber(record.parentId) then
+                    child.parentId = record.sceneID
+                end
+            end
             _document:Touch()
             notify("changed", { kind = "entity_restored", sceneID = record.sceneID })
             return CommandBus.Success("实体已恢复", actorEntry(record), {
@@ -248,6 +258,8 @@ local function registerHandlers()
             local sceneID = tonumber(command.sceneID)
             local record = copy(_document:GetEntity(sceneID))
             local program = copy(_document.programs[record.programId])
+            -- T8：记下直接子节点。RemoveEntity 会把它们上移到祖父，撤销删除时要还原回去。
+            local children = _document:GetChildren(sceneID)
             local groups = {}
             for groupId, members in pairs(_document.generatedGroups) do
                 for _, memberId in ipairs(members) do
@@ -264,7 +276,7 @@ local function registerHandlers()
             _document:Touch()
             notify("changed", { kind = "entity_deleted", sceneID = sceneID })
             return CommandBus.Success("实体已删除", record, {
-                type = "RestoreEntity", record = record, program = program, groups = groups,
+                type = "RestoreEntity", record = record, program = program, groups = groups, children = children,
             })
         end,
     })
@@ -317,6 +329,139 @@ local function registerHandlers()
             notify("changed", { kind = "world_rule_changed", rule = command.rule })
             return CommandBus.Success("世界规则已更新", { rule=command.rule, value=appliedValue }, {
                 type="SetWorldRule", rule=command.rule, value=oldValue,
+            })
+        end,
+    })
+
+    --============================================================
+    -- T8：实体属性与层级命令
+    --   SetProperty / RemoveProperty：类型由 UGCPropertySchema 白名单校验，
+    --   reference 类型额外校验目标实体存在。
+    --   SetParent / ClearParent：父必须存在、不能自引用、不能成环。
+    --============================================================
+
+    _commandBus:Register("SetProperty", {
+        -- validate 只做形状检查；语义拒绝放在 execute，才能给出稳定的错误码
+        validate = function(command)
+            if tonumber(command.sceneID) == nil then return false, "缺少 sceneID" end
+            if type(command.key) ~= "string" or command.key == "" then return false, "缺少 key" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            if not _document:GetEntity(sceneID) then
+                return CommandBus.Failure("entity_not_found", "实体不存在: " .. tostring(sceneID))
+            end
+            if not PropertySchema.IsKnown(command.key) then
+                return CommandBus.Failure("unknown_property", "未知属性键: " .. tostring(command.key))
+            end
+
+            local value, coerceError = PropertySchema.Coerce(command.key, command.value)
+            if value == nil then
+                return CommandBus.Failure("invalid_property_value", tostring(coerceError))
+            end
+            if PropertySchema.IsReference(command.key) and not _document:GetEntity(value) then
+                return CommandBus.Failure("reference_not_found",
+                    string.format("属性 %s 引用的 sceneID %s 不存在", command.key, tostring(value)))
+            end
+
+            local ok, previousOrError, existed = _document:SetProperty(sceneID, command.key, value)
+            if not ok then
+                local message = tostring(previousOrError)
+                local code = message:find("上限", 1, true) and "property_limit_reached" or "invalid_property_value"
+                return CommandBus.Failure(code, message)
+            end
+
+            _document:Touch()
+            notify("changed", { kind = "entity_property_changed", sceneID = sceneID, key = command.key })
+            local inverse = existed
+                and { type = "SetProperty", sceneID = sceneID, key = command.key, value = previousOrError }
+                or { type = "RemoveProperty", sceneID = sceneID, key = command.key }
+            return CommandBus.Success("属性已更新", { sceneID = sceneID, key = command.key, value = value }, inverse)
+        end,
+    })
+
+    _commandBus:Register("RemoveProperty", {
+        validate = function(command)
+            if tonumber(command.sceneID) == nil then return false, "缺少 sceneID" end
+            if type(command.key) ~= "string" or command.key == "" then return false, "缺少 key" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            if not _document:GetEntity(sceneID) then
+                return CommandBus.Failure("entity_not_found", "实体不存在: " .. tostring(sceneID))
+            end
+            local ok, previousOrError = _document:RemoveProperty(sceneID, command.key)
+            if not ok then
+                return CommandBus.Failure("missing_property", tostring(previousOrError))
+            end
+            _document:Touch()
+            notify("changed", { kind = "entity_property_changed", sceneID = sceneID, key = command.key })
+            return CommandBus.Success("属性已移除", { sceneID = sceneID, key = command.key }, {
+                type = "SetProperty", sceneID = sceneID, key = command.key, value = previousOrError,
+            })
+        end,
+    })
+
+    _commandBus:Register("SetParent", {
+        validate = function(command)
+            if tonumber(command.sceneID) == nil then return false, "缺少 sceneID" end
+            if tonumber(command.parentSceneID) == nil then return false, "缺少 parentSceneID" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            local parentID = tonumber(command.parentSceneID)
+            if not _document:GetEntity(sceneID) then
+                return CommandBus.Failure("entity_not_found", "实体不存在: " .. tostring(sceneID))
+            end
+            if not _document:GetEntity(parentID) then
+                return CommandBus.Failure("invalid_parent", "父实体不存在: " .. tostring(parentID))
+            end
+            if parentID == sceneID then
+                return CommandBus.Failure("invalid_parent", "实体不能以自己为父")
+            end
+            if _document:IsAncestor(sceneID, parentID) then
+                return CommandBus.Failure("hierarchy_cycle",
+                    string.format("%d 已经是 %d 的祖先，不能再把 %d 挂到 %d 下", sceneID, parentID, sceneID, parentID))
+            end
+
+            local ok, previousOrError = _document:SetParent(sceneID, parentID)
+            if not ok then
+                return CommandBus.Failure("invalid_parent", tostring(previousOrError))
+            end
+            _document:Touch()
+            notify("changed", { kind = "entity_parent_changed", sceneID = sceneID, parentSceneID = parentID })
+            local inverse = previousOrError
+                and { type = "SetParent", sceneID = sceneID, parentSceneID = previousOrError }
+                or { type = "ClearParent", sceneID = sceneID }
+            return CommandBus.Success("层级已更新", { sceneID = sceneID, parentSceneID = parentID }, inverse)
+        end,
+    })
+
+    _commandBus:Register("ClearParent", {
+        validate = function(command)
+            if tonumber(command.sceneID) == nil then return false, "缺少 sceneID" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            if not _document:GetEntity(sceneID) then
+                return CommandBus.Failure("entity_not_found", "实体不存在: " .. tostring(sceneID))
+            end
+            local previous = _document:GetParent(sceneID)
+            if not previous then
+                return CommandBus.Failure("invalid_parent", "实体没有父级")
+            end
+            local ok = _document:ClearParent(sceneID)
+            if not ok then
+                return CommandBus.Failure("invalid_parent", "清除父级失败")
+            end
+            _document:Touch()
+            notify("changed", { kind = "entity_parent_changed", sceneID = sceneID, parentSceneID = nil })
+            return CommandBus.Success("已清除父级", { sceneID = sceneID }, {
+                type = "SetParent", sceneID = sceneID, parentSceneID = previous,
             })
         end,
     })
@@ -425,6 +570,52 @@ function SceneData:GetWorldRule(rule)
     if stored ~= nil then return stored end
     if _worldRuleAdapter and _worldRuleAdapter.get then return _worldRuleAdapter.get(rule) end
     return -1
+end
+
+--============================================================
+-- T8：属性与层级门面
+--   写操作一律走命令，保证 Undo/Redo 与结构化日志；读操作直接查 Document。
+--============================================================
+
+function SceneData:SetProperty(sceneID, key, value, context)
+    return self:ExecuteCommand({ type = "SetProperty", sceneID = tonumber(sceneID), key = key, value = value },
+        context or { source = "local", approved = true })
+end
+
+function SceneData:RemoveProperty(sceneID, key, context)
+    return self:ExecuteCommand({ type = "RemoveProperty", sceneID = tonumber(sceneID), key = key },
+        context or { source = "local", approved = true })
+end
+
+function SceneData:GetProperty(sceneID, key)
+    if not ensureInitialized() then return nil end
+    return _document:GetProperty(tonumber(sceneID), key)
+end
+
+function SceneData:ListProperties(sceneID)
+    if not ensureInitialized() then return {} end
+    return _document:ListProperties(tonumber(sceneID))
+end
+
+function SceneData:SetParent(sceneID, parentSceneID, context)
+    return self:ExecuteCommand({
+        type = "SetParent", sceneID = tonumber(sceneID), parentSceneID = tonumber(parentSceneID),
+    }, context or { source = "local", approved = true })
+end
+
+function SceneData:ClearParent(sceneID, context)
+    return self:ExecuteCommand({ type = "ClearParent", sceneID = tonumber(sceneID) },
+        context or { source = "local", approved = true })
+end
+
+function SceneData:GetParent(sceneID)
+    if not ensureInitialized() then return nil end
+    return _document:GetParent(tonumber(sceneID))
+end
+
+function SceneData:GetChildren(sceneID)
+    if not ensureInitialized() then return {} end
+    return _document:GetChildren(tonumber(sceneID))
 end
 
 function SceneData:AttachExternalActor(sceneID, actor)

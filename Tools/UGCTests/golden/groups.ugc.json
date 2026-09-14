@@ -10,9 +10,9 @@
         ],
         "prefabName": "Box",
         "programId": "actor_prog_1",
-        "properties": [
-          
-        ],
+        "properties": {
+          "material": "Wood"
+        },
         "sceneID": 1,
         "tags": [
           
@@ -36,11 +36,14 @@
         "metadata": [
           
         ],
+        "parentId": 1,
         "prefabName": "Box",
         "programId": "actor_prog_2",
-        "properties": [
-          
-        ],
+        "properties": {
+          "link": 1,
+          "lit": true,
+          "mass": 12.5
+        },
         "sceneID": 2,
         "tags": [
           
@@ -94,9 +97,9 @@
         ],
         "prefabName": "Sphere",
         "programId": "actor_prog_4",
-        "properties": [
-          
-        ],
+        "properties": {
+          "note": "golden note"
+        },
         "sceneID": 4,
         "tags": [
           
@@ -127,7 +130,7 @@
     "header": {
       "contentVersion": "1",
       "documentId": "ugc-golden-groups",
-      "revision": 10,
+      "revision": 16,
       "schemaVersion": 3
     },
     "nextBatchID": 2,

@@ -192,6 +192,7 @@ local SCENARIOS = {
         documentId = "ugc-golden-groups",
         fixture = "groups.ugc.json",
         --- 生成批次：匿名 batch_1 + 具名 batch_forest_a，验证 generatedGroups 与 nextBatchID
+        --- T8 起同时覆盖 properties（Typed Property Bag）与 parentId 层级的序列化形状
         build = function(SD)
             local first = SD:CreateActorWithTransform("Box", UE.UKismetMathLibrary.MakeTransform(
                 UE.FVector(100, 0, 0), UE.FRotator(0, 0, 0), UE.FVector(1, 1, 1)))
@@ -208,6 +209,13 @@ local SCENARIOS = {
             local named = SD:BeginNamedBatch("forest_a")
             SD:AddToBatch(named, third)
             SD:AddToBatch(named, fourth)
+
+            SD:SetParent(second, first)
+            SD:SetProperty(first, "material", "Wood")
+            SD:SetProperty(second, "mass", 12.5)
+            SD:SetProperty(second, "link", first)
+            SD:SetProperty(second, "lit", true)
+            SD:SetProperty(fourth, "note", "golden note")
 
             return { activeProgramId = "level_main" }
         end,

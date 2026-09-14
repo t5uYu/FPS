@@ -379,6 +379,85 @@ function Registry:RegisterAll()
     })
 
     -- --------------------------------------------------------
+    -- 实体属性与层级（T8）
+    --   properties 受 UGCPropertySchema 白名单约束。value 可以由模型以字符串给出
+    --   （"12" / "true" / "Metal" / "3"），服务端按 key 的类型转换后再校验，模型没法绕过 schema。
+    -- --------------------------------------------------------
+
+    local PropertySchema = require("Gameplay.UGC.UGCPropertySchema")
+
+    self:Register("set_property", {
+        desc = "设置场景 Actor 的属性（白名单 + 类型校验）。可用键：mass(质量kg,0~10000) / note(备注,<=128字符) / lit(是否点亮,true|false) / material(材质:Default|Metal|Wood|Concrete|Glass) / team(队伍:None|TeamA|TeamB) / link(关联实体 sceneID)",
+        params = {
+            { name = "scene_id", type = "number", desc = "Actor 的场景 ID（整数）", required = true },
+            { name = "key",      type = "string", enum = PropertySchema.KeyList(), desc = "属性键", required = true },
+            { name = "value",    type = "string", desc = "属性值（按 key 的类型解释：数值 / true|false / 枚举名 / sceneID）", required = true },
+        },
+        func = function(p, context)
+            if p.scene_id == nil or not p.key or p.value == nil then
+                return false, "缺少参数 scene_id / key / value"
+            end
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local result = SceneData:ExecuteCommand({
+                type = "SetProperty", sceneID = tonumber(p.scene_id), key = tostring(p.key), value = p.value,
+            }, context)
+            if not result.ok then return false, result.message end
+            return true, string.format("Actor %s 的 %s 已设为 %s",
+                tostring(p.scene_id), tostring(p.key), tostring(result.data.value))
+        end
+    })
+
+    self:Register("get_property", {
+        desc = "读取场景 Actor 的某个属性值",
+        params = {
+            { name = "scene_id", type = "number", desc = "Actor 的场景 ID（整数）", required = true },
+            { name = "key",      type = "string", enum = PropertySchema.KeyList(), desc = "属性键", required = true },
+        },
+        func = function(p)
+            if p.scene_id == nil or not p.key then return false, "缺少参数 scene_id / key" end
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local value = SceneData:GetProperty(tonumber(p.scene_id), tostring(p.key))
+            if value == nil then
+                return false, string.format("Actor %s 没有属性 %s", tostring(p.scene_id), tostring(p.key))
+            end
+            return true, string.format("%s = %s", tostring(p.key), tostring(value))
+        end
+    })
+
+    self:Register("set_parent", {
+        desc = "设置层级：把 scene_id 挂到 parent_scene_id 之下。父不存在、自引用、会成环都会被拒绝",
+        params = {
+            { name = "scene_id",        type = "number", desc = "子 Actor 的场景 ID（整数）", required = true },
+            { name = "parent_scene_id", type = "number", desc = "父 Actor 的场景 ID（整数）", required = true },
+        },
+        func = function(p, context)
+            if p.scene_id == nil or p.parent_scene_id == nil then
+                return false, "缺少参数 scene_id / parent_scene_id"
+            end
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local result = SceneData:ExecuteCommand({
+                type = "SetParent", sceneID = tonumber(p.scene_id), parentSceneID = tonumber(p.parent_scene_id),
+            }, context)
+            if not result.ok then return false, result.message end
+            return true, string.format("Actor %s 已挂到 %s 之下", tostring(p.scene_id), tostring(p.parent_scene_id))
+        end
+    })
+
+    self:Register("list_children", {
+        desc = "列出某个 Actor 的直接子节点（按 scene_id 升序）",
+        params = {
+            { name = "scene_id", type = "number", desc = "Actor 的场景 ID（整数）", required = true },
+        },
+        func = function(p)
+            if p.scene_id == nil then return false, "缺少参数 scene_id" end
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local children = SceneData:GetChildren(tonumber(p.scene_id))
+            if #children == 0 then return true, "没有子节点" end
+            return true, "children=" .. table.concat(children, ",")
+        end
+    })
+
+    -- --------------------------------------------------------
     -- PCG 过程化内容生成（2026-04-16 新增）
     -- --------------------------------------------------------
 
