@@ -50,6 +50,12 @@ local WindowZOrder = {
     ["WBP_UGCBlueprintEditor"] = 20,
 }
 
+-- HUD is always-on gameplay chrome. It should not enter the modal window stack
+-- or switch input mode away from pure gameplay.
+local NonInteractiveWindows = {
+    ["UI/WBP_HUD"] = true,
+}
+
 -- 非全屏窗口尺寸配置（不填则全屏）
 -- Size: 像素大小；Position: 左上角偏移（nil = 屏幕居中）
 local WindowSize = {
@@ -139,10 +145,13 @@ function UIManager:OpenWindow(name)
     end
 
     _openWindows[name] = widget
-    table.insert(_windowStack, name)
 
-    -- 有任意窗口打开就切到 UI 输入模式
-    SetUIInputMode(true)
+    if not NonInteractiveWindows[name] then
+        table.insert(_windowStack, name)
+
+        -- 有任意交互窗口打开就切到 UI 输入模式
+        SetUIInputMode(true)
+    end
 
     return widget
 end
@@ -155,7 +164,7 @@ function UIManager:CloseWindow(name)
     widget:RemoveFromParent()
     _openWindows[name] = nil
 
-    -- 从栈里移除
+    -- 从栈里移除（HUD 等非交互窗口不会在栈中）
     for i = #_windowStack, 1, -1 do
         if _windowStack[i] == name then
             table.remove(_windowStack, i)

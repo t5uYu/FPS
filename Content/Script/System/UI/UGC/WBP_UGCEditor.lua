@@ -42,6 +42,52 @@ local function Warn(msg)
     print(LOG_TAG .. "[Warn] " .. tostring(msg))
 end
 
+local Colors = {
+    HeaderBg = UE.FLinearColor(0.08, 0.12, 0.18, 1.0),
+    ItemBg = UE.FLinearColor(0.12, 0.20, 0.30, 1.0),
+    ImportBg = UE.FLinearColor(0.00, 0.55, 0.46, 1.0),
+}
+
+local function callWidgetMethod(widget, methodName, ...)
+    if widget and widget[methodName] then
+        pcall(widget[methodName], widget, ...)
+    end
+end
+
+local function setupPrefabLabel(label, text, wrapAt)
+    if not label then return end
+
+    label:SetText(tostring(text or ""))
+    callWidgetMethod(label, "SetJustification", UE.ETextJustify.Center)
+    callWidgetMethod(label, "SetMinDesiredWidth", 150.0)
+    callWidgetMethod(label, "SetAutoWrapText", true)
+    callWidgetMethod(label, "SetWrapTextAt", wrapAt or 128.0)
+    callWidgetMethod(label, "SetRenderOpacity", 1.0)
+
+    if UE.ETextWrappingPolicy and UE.ETextWrappingPolicy.AllowPerCharacterWrapping then
+        callWidgetMethod(label, "SetWrappingPolicy", UE.ETextWrappingPolicy.AllowPerCharacterWrapping)
+    end
+end
+
+local function setupPrefabButton(button, bgColor)
+    if not button then return end
+
+    callWidgetMethod(button, "SetRenderOpacity", 1.0)
+    if bgColor then
+        callWidgetMethod(button, "SetBackgroundColor", bgColor)
+    end
+end
+
+local function setupPrefabButtonSlot(slot)
+    if not slot then return end
+
+    callWidgetMethod(slot, "SetHorizontalAlignment", UE.EHorizontalAlignment.HAlign_Fill)
+    callWidgetMethod(slot, "SetVerticalAlignment", UE.EVerticalAlignment.VAlign_Center)
+    if UE.FMargin then
+        callWidgetMethod(slot, "SetPadding", UE.FMargin(8.0, 3.0, 8.0, 3.0))
+    end
+end
+
 local function bindButton(self, widgetName, handler)
     local widget = self[widgetName]
     if not widget then
@@ -54,6 +100,19 @@ local function bindButton(self, widgetName, handler)
     end
     widget.OnClicked:Add(self, handler)
     return true
+end
+
+local function bindAnyButton(self, widgetNames, handler)
+    for _, widgetName in ipairs(widgetNames) do
+        local widget = self[widgetName]
+        if widget and widget.OnClicked then
+            widget.OnClicked:Add(self, handler)
+            Log("绑定按钮: " .. widgetName)
+            return true
+        end
+    end
+    Warn("缺少按钮控件: " .. table.concat(widgetNames, " / ") .. "（请检查蓝图命名和 Is Variable）")
+    return false
 end
 
 local function bindTextCommit(self, widgetName)
@@ -91,6 +150,10 @@ function M:Construct()
         if not bindButton(self, pair[1], pair[2]) then
             missingCount = missingCount + 1
         end
+    end
+
+    if not bindAnyButton(self, { "w_btn_Fab", "btn_fab" }, M.OnClickFab) then
+        missingCount = missingCount + 1
     end
 
     for _, widgetName in ipairs({
@@ -207,20 +270,23 @@ function M:BuildPrefabList()
 
     local addedCount = 0
 
+    -- AnimAgent：在所有分类前插入"+ 导入本地 GLB"按钮
+    self:_BuildImportGLBButton(pc, btnClass)
+
     for _, category in ipairs(cats) do
         local header = UE.UWidgetBlueprintLibrary.Create(pc, btnClass, pc)
         if header then
             if header.w_label then
-                header.w_label:SetText("── " .. category.name .. " ──")
+                setupPrefabLabel(header.w_label, category.name, 128.0)
             else
                 Warn("分类按钮缺少 w_label: " .. tostring(category.name))
             end
             if header.w_btn then
-                header.w_btn:SetIsEnabled(false)
+                setupPrefabButton(header.w_btn, Colors.HeaderBg)
             else
                 Warn("分类按钮缺少 w_btn: " .. tostring(category.name))
             end
-            self.w_panel_Prefabs:AddChild(header)
+            setupPrefabButtonSlot(self.w_panel_Prefabs:AddChild(header))
         else
             Warn("创建分类标题失败: " .. tostring(category.name))
         end
@@ -229,10 +295,11 @@ function M:BuildPrefabList()
             local btn = UE.UWidgetBlueprintLibrary.Create(pc, btnClass, pc)
             if btn then
                 if btn.w_label then
-                    btn.w_label:SetText(item.label)
+                    setupPrefabLabel(btn.w_label, item.label, 128.0)
                 else
                     Warn("预制体按钮缺少 w_label: " .. tostring(item.id))
                 end
+                setupPrefabButton(btn.w_btn, Colors.ItemBg)
 
                 local prefabID = item.id
                 if btn.w_btn and btn.w_btn.OnPressed then
@@ -243,7 +310,7 @@ function M:BuildPrefabList()
                     Warn("预制体按钮缺少 w_btn 或 OnPressed: " .. tostring(item.id))
                 end
 
-                self.w_panel_Prefabs:AddChild(btn)
+                setupPrefabButtonSlot(self.w_panel_Prefabs:AddChild(btn))
                 addedCount = addedCount + 1
                 Log("添加: " .. tostring(item.id))
             else
@@ -253,6 +320,72 @@ function M:BuildPrefabList()
     end
 
     Log(string.format("BuildPrefabList 完成，共添加 %d 个预制体按钮", addedCount))
+end
+
+--============================================================
+-- AnimAgent：本地 GLB 导入入口
+--============================================================
+
+local _animAgentReady = false
+
+local function _ensureAnimAgent(pc)
+    if _animAgentReady then return true end
+    local ok, Core = pcall(require, "Gameplay.AnimAgent.AnimAgentCore")
+    if not ok or not Core then
+        Warn("AnimAgentCore 加载失败: " .. tostring(Core))
+        return false
+    end
+    if not Core:IsReady() then
+        if not Core:Init(pc) then
+            Warn("AnimAgentCore:Init 失败 — 检查 PlayerController 是否挂了 UAnimGenClient")
+            return false
+        end
+    end
+    _animAgentReady = true
+    return true
+end
+
+function M:_BuildImportGLBButton(pc, btnClass)
+    local btn = UE.UWidgetBlueprintLibrary.Create(pc, btnClass, pc)
+    if not btn then
+        Warn("_BuildImportGLBButton: Create 失败")
+        return
+    end
+    if btn.w_label then
+        setupPrefabLabel(btn.w_label, "+ GLB", 128.0)
+    end
+    setupPrefabButton(btn.w_btn, Colors.ImportBg)
+    if btn.w_btn and btn.w_btn.OnPressed then
+        btn.w_btn.OnPressed:Add(self, function() self:OnClickImportGLB() end)
+    end
+    setupPrefabButtonSlot(self.w_panel_Prefabs:AddChild(btn))
+end
+
+function M:OnClickImportGLB()
+    local pc = self:GetOwningPlayer()
+    if not pc then return end
+    if not _ensureAnimAgent(pc) then
+        self:SetStatus("AnimAgent 未就绪")
+        return
+    end
+
+    local files = UE.UAnimGenClient.OpenFileDialog(
+        "选择本地 GLB 模型", "", "GLB Model (*.glb)|*.glb", false)
+    if not files or files:Num() == 0 then
+        self:SetStatus("已取消导入")
+        return
+    end
+
+    local Core = require("Gameplay.AnimAgent.AnimAgentCore")
+    local uuid = Core:ImportLocal(files:Get(1), "")  -- UnLua TArray:Get 是 1-based
+    if uuid == "" then
+        self:SetStatus("导入失败 — 检查日志")
+        return
+    end
+
+    self:SetStatus(string.format("导入完成 [%s]，已加入预制体列表", uuid:sub(1, 8)))
+    -- 刷新 placeable 面板，新资产以 dyn:{uuid} 出现在 "AI 生成" 分类下
+    self:RebuildPrefabList()
 end
 
 --============================================================
@@ -422,6 +555,34 @@ function M:OnClickChat()
     pc:ScheduleCallback(function()
         local UIManager = require("Gameplay.Core.UIManager")
         UIManager:ToggleWindow("WBP_UGCChat")
+    end, 1)
+end
+
+--- 打开 Fab 资产平台面板。
+function M:OnClickFab()
+    local pc = self:GetOwningPlayer()
+    if not pc then
+        self:SetStatus("打开 Fab 失败：未找到 PlayerController")
+        return
+    end
+
+    pc:ScheduleCallback(function()
+        local PanelClassPath = "/Game/_UGC/UI/WBP_FabPanel.WBP_FabPanel_C"
+        local PanelClass = UE.UClass.Load(PanelClassPath)
+        if not PanelClass then
+            Warn("加载 WBP_FabPanel 类失败: " .. PanelClassPath)
+            self:SetStatus("打开 Fab 面板失败：资源未找到")
+            return
+        end
+
+        local widget = UE.UWidgetBlueprintLibrary.Create(self, PanelClass, pc)
+        if not widget then
+            self:SetStatus("打开 Fab 面板失败：CreateWidget 失败")
+            return
+        end
+
+        widget:AddToViewport(20)
+        self:SetStatus("已打开 Fab 资产平台")
     end, 1)
 end
 

@@ -7,6 +7,7 @@
 #include "FPSHUDWidget.generated.h"
 
 class AFPSCharacter;
+class AFPSPlayerState;
 class AFPSWeaponBase;
 class UFPSCombatAttributeSet;
 class UProgressBar;
@@ -30,6 +31,14 @@ public:
 	/** Initialize the HUD with a character */
 	UFUNCTION(BlueprintCallable, Category = "FPS|HUD")
 	void InitializeHUD(AFPSCharacter* InCharacter);
+
+	/** Initialize the HUD directly from PlayerState, where GAS data lives */
+	UFUNCTION(BlueprintCallable, Category = "FPS|HUD")
+	void InitializeHUDFromPlayerState(AFPSPlayerState* InPlayerState);
+
+	/** Initialize from the owning player controller's PlayerState/Pawn */
+	UFUNCTION(BlueprintCallable, Category = "FPS|HUD")
+	void InitializeHUDFromOwningPlayer();
 
 	/** Update health display */
 	UFUNCTION(BlueprintCallable, Category = "FPS|HUD")
@@ -113,6 +122,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	/** Reference to the owning character */
@@ -127,11 +137,21 @@ protected:
 	UPROPERTY()
 	TWeakObjectPtr<AFPSWeaponBase> CurrentWeapon;
 
+	/** Cached PlayerState; GAS attributes are owned by PlayerState */
+	UPROPERTY()
+	TWeakObjectPtr<AFPSPlayerState> OwningPlayerState;
+
 	/** Bind to attribute changes */
 	void BindAttributeChanges();
 
 	/** Unbind from attribute changes */
 	void UnbindAttributeChanges();
+
+	/** Refresh all GAS-driven values from the cached PlayerState */
+	void RefreshFromPlayerState();
+
+	/** Bind/unbind weapon ammo events when active weapon changes */
+	void RefreshWeaponBinding();
 
 	//-------------------------------------------------------------------
 	// Attribute change handlers

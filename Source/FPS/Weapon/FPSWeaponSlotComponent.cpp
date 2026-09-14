@@ -310,6 +310,14 @@ void UFPSWeaponSlotComponent::PerformSwitchToSlot(EFPSWeaponSlot NewSlot)
 				BodyMesh,
 				FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 				TEXT("hand_r"));
+			if (NewWeapon->GetRootComponent())
+			{
+				NewWeapon->GetRootComponent()->SetRelativeLocation(NewWeapon->EquippedRelativeLocationOffset);
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[WeaponSlot] Equipped %s offset=%s relative=%s"),
+				*GetNameSafe(NewWeapon),
+				*NewWeapon->EquippedRelativeLocationOffset.ToString(),
+				*NewWeapon->GetRootComponent()->GetRelativeLocation().ToString());
 		}
 	}
 

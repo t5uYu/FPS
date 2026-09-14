@@ -24,6 +24,9 @@ local BACK_SOCKETS = {
     [1] = "weapon_back_2",
 }
 
+local LEFT_HAND_SOCKET = "LeftHandSocket"
+local RIGHT_HAND_SOCKETS = { "RightHandSocket", "GripSocket", "GripPoint" }
+
 function M:ReceiveBeginPlay()
     -- 每次重生/开始游戏时清空武器槽位
     self:ClearAllWeapons()
@@ -54,12 +57,12 @@ end
 -- 清空所有武器槽位（在每次重生/BeginPlay时调用）
 function M:ClearAllWeapons()
     if not self.WeaponSlotComp then return end
-    
+
     local Dummy = UE.FInventoryItem()
     self.WeaponSlotComp:RemoveWeaponFromSlot(UE.EFPSWeaponSlot.Primary1, Dummy)
     self.WeaponSlotComp:RemoveWeaponFromSlot(UE.EFPSWeaponSlot.Primary2, Dummy)
     self.WeaponSlotComp:RemoveWeaponFromSlot(UE.EFPSWeaponSlot.Pistol, Dummy)
-    
+
     UE.UKismetSystemLibrary.PrintString(self, "[FPSPlayer] 已清空默认初始武器", true, true, UE.FLinearColor(0.5, 0.5, 0.5, 1), 5)
 end
 
@@ -170,23 +173,89 @@ end
 
 -- 返回当前武器左手握持点的 Component Space Transform（供 ABP_Manny FABRIK/TwoBoneIK 使用）
 -- 只传位置，旋转置零——避免 FABRIK EffectorRotationSource=CopyFromTarget 时拷贝错误旋转导致手扭曲
-function M:IF_GetLeftHandSocketTransform()
-    if not self.WeaponSlotComp then return UE.FTransform() end
-    local Weapon = self.WeaponSlotComp:GetActiveWeapon()
-    if not Weapon then return UE.FTransform() end
-
-    local WeaponMesh = Weapon.WeaponMesh
-    local charMesh = self.Mesh
-    if not WeaponMesh or not charMesh then return UE.FTransform() end
-    if not WeaponMesh:DoesSocketExist("LeftHandSocket") then return UE.FTransform() end
-
-    -- 用分步函数获取 Mesh Component 世界坐标（BlueprintCallable UFUNCTION，比 K2_GetComponentToWorld 更稳定）
+local function MakeComponentSpaceTransform(WorldTransform, charMesh)
     local meshLoc = charMesh:K2_GetComponentLocation()
     local meshRot = charMesh:K2_GetComponentRotation()
     local meshWorldT = UE.UKismetMathLibrary.MakeTransform(meshLoc, meshRot, UE.FVector(1, 1, 1))
+    return UE.UKismetMathLibrary.MakeRelativeTransform(WorldTransform, meshWorldT)
+end
 
-    local socketWorldT = WeaponMesh:GetSocketTransform("LeftHandSocket", 0)
-    return UE.UKismetMathLibrary.MakeRelativeTransform(socketWorldT, meshWorldT)
+local function GetCurrentHandComponentTransform(charMesh, HandSocketName)
+    if not charMesh then return UE.FTransform() end
+
+    local handWorldT = charMesh:GetSocketTransform(HandSocketName, 0)
+    return MakeComponentSpaceTransform(handWorldT, charMesh)
+end
+
+local function FindFirstSocket(Mesh, SocketNames)
+    if not Mesh then return nil end
+
+    for _, SocketName in ipairs(SocketNames) do
+        if Mesh:DoesSocketExist(SocketName) then
+            return SocketName
+        end
+    end
+
+    return nil
+end
+
+function M:SetAnimValue(Name, Value)
+    local Mesh = self.Mesh
+    if not Mesh then return end
+
+    local AnimInst = Mesh:GetAnimInstance()
+    if AnimInst and UE.UKismetSystemLibrary.IsValid(AnimInst) then
+        AnimInst[Name] = Value
+    end
+end
+
+function M:UpdateRightHandIK(WeaponMesh, charMesh)
+    local SocketName = FindFirstSocket(WeaponMesh, RIGHT_HAND_SOCKETS)
+    if not SocketName or not charMesh then
+        self:SetAnimValue("RightHandIKAlpha", 0)
+        self:SetAnimValue("RightHandSocketTransform", GetCurrentHandComponentTransform(charMesh, "hand_r"))
+        return
+    end
+
+    local socketWorldT = WeaponMesh:GetSocketTransform(SocketName, 0)
+    self:SetAnimValue("RightHandSocketTransform", MakeComponentSpaceTransform(socketWorldT, charMesh))
+    self:SetAnimValue("RightHandIKAlpha", 0)
+end
+
+function M:IF_GetLeftHandSocketTransform()
+    local charMesh = self.Mesh
+    if not self.WeaponSlotComp then
+        self:SetAnimValue("LeftHandIKAlpha", 0)
+        self:UpdateRightHandIK(nil, charMesh)
+        return GetCurrentHandComponentTransform(charMesh, "hand_l")
+    end
+
+    local Weapon = self.WeaponSlotComp:GetActiveWeapon()
+    if not Weapon then
+        self:SetAnimValue("LeftHandIKAlpha", 0)
+        self:UpdateRightHandIK(nil, charMesh)
+        return GetCurrentHandComponentTransform(charMesh, "hand_l")
+    end
+
+    local WeaponMesh = Weapon.WeaponMesh
+    if not WeaponMesh or not charMesh then
+        self:SetAnimValue("LeftHandIKAlpha", 0)
+        self:UpdateRightHandIK(WeaponMesh, charMesh)
+        return GetCurrentHandComponentTransform(charMesh, "hand_l")
+    end
+
+    self:UpdateRightHandIK(WeaponMesh, charMesh)
+
+    if not WeaponMesh:DoesSocketExist(LEFT_HAND_SOCKET) then
+        self:SetAnimValue("LeftHandIKAlpha", 0)
+        return GetCurrentHandComponentTransform(charMesh, "hand_l")
+    end
+
+    self:SetAnimValue("LeftHandIKAlpha", 0.85)
+
+    -- 用分步函数获取 Mesh Component 世界坐标（BlueprintCallable UFUNCTION，比 K2_GetComponentToWorld 更稳定）
+    local socketWorldT = WeaponMesh:GetSocketTransform(LEFT_HAND_SOCKET, 0)
+    return MakeComponentSpaceTransform(socketWorldT, charMesh)
 end
 
 -- 返回手部晃动数据给 ABP_Manny（SideMovement, MouseX, MouseY）

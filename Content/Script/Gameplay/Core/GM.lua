@@ -20,7 +20,7 @@
 
 -- ── 配置区 ────────────────────────────────────────────────────────────────
 local GM_WEAPONS = {
-    Primary1 = "/Game/_FPS/Weapon/BP_WeaponBase.BP_WeaponBase_C",
+    Primary1 = "/Game/_FPS/Weapon/KA47/BP_Weapon_KA47.BP_Weapon_KA47_C",
     Primary2 = "/Game/_FPS/Blueprints/Weapons/BP_Rifle.BP_Rifle_C",
     Pistol   = "/Game/_FPS/Blueprints/Weapons/BP_Pistol.BP_Pistol_C",
 }

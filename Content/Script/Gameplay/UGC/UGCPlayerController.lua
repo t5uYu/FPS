@@ -9,6 +9,7 @@
 ]]
 
 local UIManager      = require("Gameplay.Core.UIManager")
+local GM             = require("Gameplay.Core.GM")
 local UGCRegistry    = require("Gameplay.UGC.UGCFunctionRegistry")
 local LLMGateway     = require("Gameplay.UGC.LLMGateway")
 local EditorCore     = require("Gameplay.UGC.UGCEditorCore")
@@ -24,8 +25,10 @@ local Base = require("Gameplay.PlayerController")
 --============================================================
 
 function M:ReceiveBeginPlay()
-    -- 调用基类（UIManager:Init、GM.Init、OpenHUD）
-    Base.ReceiveBeginPlay(self)
+    -- UGC 模式暂时不显示通用 FPS HUD；这里只保留基类 BeginPlay 里的非 HUD 初始化。
+    -- Base.ReceiveBeginPlay(self)
+    UIManager:Init(self)
+    GM.Init(self)
 
     -- 初始化 UGC 层
     EditorCore:Init(self)

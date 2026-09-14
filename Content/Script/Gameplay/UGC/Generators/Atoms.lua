@@ -176,4 +176,128 @@ function M.Wall(from, to, segment_length, height_layers, layer_height)
     return pts
 end
 
+--============================================================
+-- 6. PlaceAt：单点精确放置（含完整旋转）
+--============================================================
+
+function M.PlaceAt(x, y, z, yaw, pitch, roll)
+    return { { x=x or 0, y=y or 0, z=z or 0,
+               yaw=yaw or 0, pitch=pitch or 0, roll=roll or 0 } }
+end
+
+--============================================================
+-- 7. PlaceAlongPath：沿任意折线均匀间隔放置
+-- points: { {x,y,z}, {x,y,z}, ... }
+-- spacing: 相邻 Actor 间距（cm）
+-- yaw_align: true 时每个 Actor yaw 对齐到当前段方向
+--============================================================
+
+function M.PlaceAlongPath(points, spacing, yaw_align)
+    local pts = {}
+    if not points or #points < 2 or not spacing or spacing <= 0 then
+        return pts
+    end
+
+    -- 计算每段长度与累计长度
+    local segLens = {}
+    local total = 0
+    for i = 1, #points - 1 do
+        local a, b = points[i], points[i+1]
+        local dx = (b.x or 0) - (a.x or 0)
+        local dy = (b.y or 0) - (a.y or 0)
+        local dz = (b.z or 0) - (a.z or 0)
+        local L = math.sqrt(dx*dx + dy*dy + dz*dz)
+        segLens[i] = L
+        total = total + L
+    end
+    if total < 1 then return pts end
+
+    -- 沿折线步进 spacing 距离取点
+    local nSteps = math.floor(total / spacing) + 1
+    for k = 0, nSteps - 1 do
+        local target = k * spacing
+        local segIdx = 1
+        local acc = 0
+        while segIdx <= #segLens and acc + segLens[segIdx] < target do
+            acc = acc + segLens[segIdx]
+            segIdx = segIdx + 1
+        end
+        if segIdx > #segLens then break end
+        local a, b = points[segIdx], points[segIdx+1]
+        local segL = segLens[segIdx]
+        local t = (segL > 0) and ((target - acc) / segL) or 0
+        local dx = (b.x or 0) - (a.x or 0)
+        local dy = (b.y or 0) - (a.y or 0)
+        local yaw = yaw_align and math.deg(math.atan2(dy, dx)) or 0
+        pts[#pts+1] = {
+            x = (a.x or 0) + dx * t,
+            y = (a.y or 0) + dy * t,
+            z = (a.z or 0) + ((b.z or 0) - (a.z or 0)) * t,
+            yaw = yaw,
+        }
+    end
+    return pts
+end
+
+--============================================================
+-- 8. FillPolygon：在任意 2D 多边形内按密度随机填充（XY 平面）
+-- vertices: { {x,y}, {x,y}, ... }（按顺/逆时针均可）
+-- density: 期望 Actor 数量（不是面积密度，便于直观控制）
+-- z: 统一 Z 坐标
+-- seed: 随机种子
+-- 算法：bounding box 内拒绝采样 + 射线交叉判内
+--============================================================
+
+local function pointInPolygon(px, py, verts)
+    local inside = false
+    local n = #verts
+    local j = n
+    for i = 1, n do
+        local xi, yi = verts[i].x or 0, verts[i].y or 0
+        local xj, yj = verts[j].x or 0, verts[j].y or 0
+        if ((yi > py) ~= (yj > py)) and
+           (px < (xj - xi) * (py - yi) / ((yj - yi) ~= 0 and (yj - yi) or 1e-9) + xi) then
+            inside = not inside
+        end
+        j = i
+    end
+    return inside
+end
+
+function M.FillPolygon(vertices, density, z, seed, opts)
+    opts = opts or {}
+    local pts = {}
+    if not vertices or #vertices < 3 or not density or density < 1 then
+        return pts
+    end
+    z = z or 0
+    local rng = makeRng(seed)
+    local rotMode = opts.rotation or "none"
+
+    -- bounding box
+    local xmin, ymin = math.huge, math.huge
+    local xmax, ymax = -math.huge, -math.huge
+    for _, v in ipairs(vertices) do
+        local vx, vy = v.x or 0, v.y or 0
+        if vx < xmin then xmin = vx end
+        if vy < ymin then ymin = vy end
+        if vx > xmax then xmax = vx end
+        if vy > ymax then ymax = vy end
+    end
+
+    -- 拒绝采样：最多尝试 density × 30 次
+    local maxTries = math.max(50, density * 30)
+    local tries = 0
+    while #pts < density and tries < maxTries do
+        tries = tries + 1
+        local x = xmin + rng() * (xmax - xmin)
+        local y = ymin + rng() * (ymax - ymin)
+        if pointInPolygon(x, y, vertices) then
+            local yaw = (rotMode == "yaw_random") and (rng() * 360) or 0
+            pts[#pts+1] = { x=x, y=y, z=z, yaw=yaw }
+        end
+    end
+    return pts
+end
+
 return M

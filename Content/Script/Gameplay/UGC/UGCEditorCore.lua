@@ -314,7 +314,16 @@ function EditorCore:Init(playerController)
 
     SceneData:Init(_bridge)
     PrefabRegistry:LoadDynamic(_bridge)   -- 扫描 Placeables 目录 + 加载自定义 JSON
-    Log.Info("editor_initialized")
+
+    -- AnimAgent dyn 资产：所有 SpawnPlaceable 后自动注入 mesh
+    -- 这样 Save/Load/Undo/Redo 全流程通用，SceneData 无需感知 dyn 细节
+    SceneData:SetActorCreatedHook(function(actor, prefabName)
+        if PrefabRegistry.GetKind(prefabName) == "dynamic_glb" then
+            EditorCore:_InjectDynMesh(actor, prefabName)
+        end
+    end)
+
+    print("[UGCEditorCore] 初始化完成")
 end
 
 --- 内部：确保 _bridge 有效；若为 nil 则尝试从 _pc 懒初始化，仍失败返回 false
@@ -446,6 +455,7 @@ function EditorCore:SelectPrefab(prefabName)
         Log.Error("unknown_prefab", nil, { prefab = prefabName })
         return
     end
+
     -- 清除旧 ghost
     self:_destroyGhost()
     self:ClearSelection()
@@ -459,9 +469,15 @@ function EditorCore:SelectPrefab(prefabName)
     local path = PrefabRegistry.GetPath(prefabName)
     local spawnLoc = UE.FVector(0, 0, -99999)
     _ghostActor = _bridge:SpawnPlaceable(path, spawnLoc, UE.FRotator(0, 0, 0))
+
+    -- dyn 资产：spawn 出来的是空壳 AAnimAgentDynamicPlaceable，立即注入 mesh
+    if _ghostActor and PrefabRegistry.GetKind(prefabName) == "dynamic_glb" then
+        self:_InjectDynMesh(_ghostActor, prefabName)
+    end
+
     if _ghostActor then
-        _bridge:SetActorHighlight(_ghostActor, true)   -- 发光轮廓表示是预览
-        pcall(function() _ghostActor:SetDebugVisible(true) end)  -- TriggerZone 预览时可见
+        _bridge:SetActorHighlight(_ghostActor, true)
+        pcall(function() _ghostActor:SetDebugVisible(true) end)
     end
     Log.Info("placement_mode", { prefab = prefabName })
 end
@@ -491,7 +507,7 @@ function EditorCore:UpdateGhostPosition(screenX, screenY)
             )
         end
         _bridge:SetActorTransform(_ghostActor,
-            UE.FTransform(UE.FRotator(0,0,0), hitPos, UE.FVector(1,1,1)))
+            UE.UKismetMathLibrary.MakeTransform(hitPos, UE.FRotator(0,0,0), UE.FVector(1,1,1)))
     end
 end
 
@@ -539,6 +555,9 @@ function EditorCore:OnViewportClick(screenX, screenY)
         local prefabName = _pendingPrefab
         self:_destroyGhost()   -- 先销毁 Ghost，再放真实 Actor
 
+        local isDyn = (PrefabRegistry.GetKind(prefabName) == "dynamic_glb")
+
+        -- SceneData:CreateActor 内部已通过 hook 自动注入 dyn mesh
         local sceneID, actor = SceneData:CreateActor(prefabName, loc)
         if actor then
             self:SelectByID(sceneID)
@@ -549,9 +568,12 @@ function EditorCore:OnViewportClick(screenX, screenY)
         if continuePath then
             local spawnLoc = UE.FVector(0, 0, -99999)
             _ghostActor = _bridge:SpawnPlaceable(continuePath, spawnLoc, UE.FRotator(0, 0, 0))
+            if _ghostActor and isDyn then
+                self:_InjectDynMesh(_ghostActor, prefabName)
+            end
             if _ghostActor then
                 _bridge:SetActorHighlight(_ghostActor, true)
-                pcall(function() _ghostActor:SetDebugVisible(true) end)  -- TriggerZone 预览时可见
+                pcall(function() _ghostActor:SetDebugVisible(true) end)
             end
             _pendingPrefab = prefabName
         end
@@ -888,6 +910,51 @@ function EditorCore:UpdateGizmoScale()
     local t = _bridge:GetActorTransform(entry.actor)
     local loc, _, _ = UE.UKismetMathLibrary.BreakTransform(t)
     updateGizmoTransform(loc.X, loc.Y, loc.Z)
+end
+
+--============================================================
+-- AnimAgent 动态 GLB 资产支持
+--
+-- 设计：dyn 资产走和其他 placeable 完全一致的 SpawnPlaceable + SceneData 流程，
+-- 区别仅在 spawn 出来后立即向 AAnimAgentDynamicPlaceable 注入实际的 UStaticMesh。
+--============================================================
+
+--- 通过 _bridge:GetOwner() 拿 PC，再 GetComponentByClass 取 ImportBridge
+local function _getImportBridge()
+    if not _bridge then return nil end
+    local pc = nil
+    pcall(function() pc = _bridge:GetOwner() end)
+    if not pc then return nil end
+    local importBridge = nil
+    pcall(function() importBridge = pc:GetComponentByClass(UE.UAnimImportBridge) end)
+    return importBridge
+end
+
+--- 给一个刚 spawn 出来的 AAnimAgentDynamicPlaceable 注入 mesh
+function EditorCore:_InjectDynMesh(actor, prefabName)
+    if not actor then return end
+    local dyn = PrefabRegistry.GetDynamicGLB(prefabName)
+    if not dyn then return end
+
+    local importBridge = _getImportBridge()
+    if not importBridge then
+        print("[UGCEditorCore] _InjectDynMesh: 未找到 UAnimImportBridge")
+        return
+    end
+
+    local mesh = nil
+    pcall(function() mesh = importBridge:FindCachedMesh(dyn.uuid) end)
+    if not mesh then
+        -- ImportGLBAsync 当前同步：调完立刻能从缓存拿
+        pcall(function() importBridge:ImportGLBAsync(dyn.uuid, dyn.glb_path) end)
+        pcall(function() mesh = importBridge:FindCachedMesh(dyn.uuid) end)
+    end
+    if not mesh then
+        print("[UGCEditorCore] _InjectDynMesh: mesh 加载失败 uuid=" .. tostring(dyn.uuid))
+        return
+    end
+
+    pcall(function() actor:SetDynMesh(mesh, dyn.uuid) end)
 end
 
 return EditorCore

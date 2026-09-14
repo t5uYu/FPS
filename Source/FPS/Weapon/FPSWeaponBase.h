@@ -54,6 +54,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	UFPSWeaponDataAsset* WeaponData;
 
+	/** Applied after attaching to the character's right hand socket. Tune per weapon Blueprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Attachment")
+	FVector EquippedRelativeLocationOffset = FVector::ZeroVector;
+
 	//-------------------------------------------------------------------
 	// State
 	//-------------------------------------------------------------------

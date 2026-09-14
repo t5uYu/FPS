@@ -212,10 +212,10 @@ struct FInventoryItem
 	TMap<FName, float> CustomProperties;
 
 	FInventoryItem()
-		: StackCount(1)
+		: InstanceID(FGuid::NewGuid())
+		, StackCount(1)
 		, Durability(100.0f)
 	{
-		InstanceID = FGuid::NewGuid();
 	}
 };
 

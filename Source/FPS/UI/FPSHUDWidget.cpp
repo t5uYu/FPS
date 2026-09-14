@@ -2,19 +2,56 @@
 
 #include "FPSHUDWidget.h"
 #include "FPS/FPSCharacter.h"
+#include "FPS/Team/FPSPlayerState.h"
 #include "FPS/Weapon/FPSWeaponBase.h"
 #include "FPS/GAS/FPSCombatAttributeSet.h"
 #include "FPS/GAS/FPSAbilitySystemComponent.h"
 #include "FPS/GAS/FPSRecoilComponent.h"
+#include "GameFramework/PlayerController.h"
 
 void UFPSHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	InitializeHUDFromOwningPlayer();
+}
+
+void UFPSHUDWidget::NativeDestruct()
+{
+	UnbindAttributeChanges();
+
+	if (CurrentWeapon.IsValid())
+	{
+		CurrentWeapon->OnAmmoChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
+		CurrentWeapon = nullptr;
+	}
+
+	Super::NativeDestruct();
 }
 
 void UFPSHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (AFPSCharacter* Character = Cast<AFPSCharacter>(PC->GetPawn()))
+		{
+			if (Character != OwningCharacter.Get())
+			{
+				OwningCharacter = Character;
+				RefreshWeaponBinding();
+			}
+		}
+
+		if (AFPSPlayerState* PS = Cast<AFPSPlayerState>(PC->PlayerState))
+		{
+			if (PS != OwningPlayerState.Get() || !CombatAttributes.IsValid())
+			{
+				InitializeHUDFromPlayerState(PS);
+			}
+		}
+	}
 
 	// Update status effect durations
 	TArray<FName> ExpiredEffects;
@@ -32,29 +69,10 @@ void UFPSHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		RemoveStatusEffect(EffectID);
 	}
 
-	// Check for weapon changes
+	RefreshWeaponBinding();
+
 	if (OwningCharacter.IsValid())
 	{
-		AFPSWeaponBase* NewWeapon = OwningCharacter->GetCurrentWeapon();
-		if (NewWeapon != CurrentWeapon.Get())
-		{
-			// Unbind from old weapon
-			if (CurrentWeapon.IsValid())
-			{
-				CurrentWeapon->OnAmmoChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
-			}
-
-			// Bind to new weapon
-			CurrentWeapon = NewWeapon;
-			if (CurrentWeapon.IsValid())
-			{
-				CurrentWeapon->OnAmmoChanged.AddDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
-
-				// Update ammo immediately
-				HandleAmmoChanged(CurrentWeapon->GetCurrentMagazine(), CurrentWeapon->GetCurrentReserve());
-			}
-		}
-
 		// Update crosshair spread（Spread 由 RecoilComponent 管理）
 		if (OwningCharacter.IsValid() && OwningCharacter->RecoilComponent)
 		{
@@ -71,12 +89,51 @@ void UFPSHUDWidget::InitializeHUD(AFPSCharacter* InCharacter)
 	}
 
 	OwningCharacter = InCharacter;
-	CombatAttributes = InCharacter->GetCombatAttributeSet();
+	InitializeHUDFromPlayerState(InCharacter->GetFPSPlayerState());
+	RefreshWeaponBinding();
+}
+
+void UFPSHUDWidget::InitializeHUDFromPlayerState(AFPSPlayerState* InPlayerState)
+{
+	if (!InPlayerState)
+	{
+		return;
+	}
+
+	UnbindAttributeChanges();
+
+	OwningPlayerState = InPlayerState;
+	CombatAttributes = InPlayerState->GetCombatAttributeSet();
 
 	// Bind to attribute changes
 	BindAttributeChanges();
 
-	// Initial update
+	RefreshFromPlayerState();
+}
+
+void UFPSHUDWidget::InitializeHUDFromOwningPlayer()
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (AFPSCharacter* Character = Cast<AFPSCharacter>(PC->GetPawn()))
+	{
+		OwningCharacter = Character;
+	}
+
+	if (AFPSPlayerState* PS = Cast<AFPSPlayerState>(PC->PlayerState))
+	{
+		InitializeHUDFromPlayerState(PS);
+	}
+
+	RefreshWeaponBinding();
+}
+
+void UFPSHUDWidget::RefreshFromPlayerState()
+{
 	if (CombatAttributes.IsValid())
 	{
 		float Health = CombatAttributes->GetHealth();
@@ -91,13 +148,30 @@ void UFPSHUDWidget::InitializeHUD(AFPSCharacter* InCharacter)
 		float MaxStamina = CombatAttributes->GetMaxStamina();
 		UpdateStamina(Stamina, MaxStamina);
 	}
+}
 
-	// Initialize weapon ammo
-	if (AFPSWeaponBase* Weapon = InCharacter->GetCurrentWeapon())
+void UFPSHUDWidget::RefreshWeaponBinding()
+{
+	AFPSWeaponBase* NewWeapon = OwningCharacter.IsValid() ? OwningCharacter->GetCurrentWeapon() : nullptr;
+	if (NewWeapon == CurrentWeapon.Get())
 	{
-		CurrentWeapon = Weapon;
-		Weapon->OnAmmoChanged.AddDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
-		HandleAmmoChanged(Weapon->GetCurrentMagazine(), Weapon->GetCurrentReserve());
+		return;
+	}
+
+	if (CurrentWeapon.IsValid())
+	{
+		CurrentWeapon->OnAmmoChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
+	}
+
+	CurrentWeapon = NewWeapon;
+	if (CurrentWeapon.IsValid())
+	{
+		CurrentWeapon->OnAmmoChanged.AddDynamic(this, &UFPSHUDWidget::HandleAmmoChanged);
+		HandleAmmoChanged(CurrentWeapon->GetCurrentMagazine(), CurrentWeapon->GetCurrentReserve());
+	}
+	else
+	{
+		UpdateAmmo(0, 0, 0);
 	}
 }
 
@@ -168,6 +242,9 @@ void UFPSHUDWidget::BindAttributeChanges()
 {
 	if (CombatAttributes.IsValid())
 	{
+		CombatAttributes->OnHealthChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleHealthChanged);
+		CombatAttributes->OnArmorChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleArmorChanged);
+		CombatAttributes->OnStaminaChanged.RemoveDynamic(this, &UFPSHUDWidget::HandleStaminaChanged);
 		CombatAttributes->OnHealthChanged.AddDynamic(this, &UFPSHUDWidget::HandleHealthChanged);
 		CombatAttributes->OnArmorChanged.AddDynamic(this, &UFPSHUDWidget::HandleArmorChanged);
 		CombatAttributes->OnStaminaChanged.AddDynamic(this, &UFPSHUDWidget::HandleStaminaChanged);

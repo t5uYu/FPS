@@ -24,8 +24,8 @@ AFPSGameMode::AFPSGameMode()
 	, MinPlayersToStart(1)
 {
 	// Set default classes
-	static ConstructorHelpers::FClassFinder<APawn> PlayerPawnClassFinder(TEXT("/Game/FirstPerson/Blueprints/BP_FirstPersonCharacter"));
-	DefaultPawnClass = PlayerPawnClassFinder.Class;
+	/*static ConstructorHelpers::FClassFinder<APawn> PlayerPawnClassFinder(TEXT("/Game/FirstPerson/Blueprints/BP_FirstPersonCharacter"));
+	DefaultPawnClass = PlayerPawnClassFinder.Class;*/
 
 	PlayerStateClass = AFPSPlayerState::StaticClass();
 	GameStateClass = AFPSGameState::StaticClass();
