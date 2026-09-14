@@ -15,6 +15,11 @@
 
 local M = UnLua.Class()
 
+-- T17：编解码统一到 Util.json（全项目唯一实现），不再使用 rapidjson；
+-- 配置结构由 WeaponBallisticsSchema 校验，字段名/类型/范围写错会在加载期就报出来。
+local json = require("Util.json")
+local BallisticsSchema = require("Gameplay.Weapon.WeaponBallisticsSchema")
+
 -- 弹道数据缓存（所有武器实例共享，只读一次）
 local BallisticsCache = nil
 
@@ -35,17 +40,24 @@ local function LoadBallisticsData()
     local content = f:read("*all")
     f:close()
 
-    local ok, data = pcall(function()
-        return require("rapidjson").decode(content)
-    end)
-
-    if ok and data then
-        BallisticsCache = data
-    else
-        UE.UKismetSystemLibrary.PrintString(nil, "[Ballistics] JSON 解析失败", true, true, UE.FLinearColor(1,0,0,1), 5)
+    local data = json.decode(content)
+    if type(data) ~= "table" then
+        UE.UKismetSystemLibrary.PrintString(nil, "[Ballistics] JSON 解析失败（Util.json 是唯一编解码实现）", true, true, UE.FLinearColor(1,0,0,1), 5)
         BallisticsCache = {}
+        return BallisticsCache
     end
 
+    local valid, err, report = BallisticsSchema.Validate(data)
+    if not valid then
+        UE.UKismetSystemLibrary.PrintString(nil, "[Ballistics] 配置校验失败: " .. tostring(err), true, true, UE.FLinearColor(1,0,0,1), 10)
+        BallisticsCache = {}
+        return BallisticsCache
+    end
+
+    UE.UKismetSystemLibrary.PrintString(nil,
+        string.format("[Ballistics] 已加载 %d 个武器配置（%d 个 Pattern 点，schema v%d）",
+            report.weapons, report.patternPoints, report.version), false, false, UE.FLinearColor(0,1,0,1), 3)
+    BallisticsCache = data
     return BallisticsCache
 end
 

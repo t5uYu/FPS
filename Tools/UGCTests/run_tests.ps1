@@ -52,6 +52,18 @@ if ($StaleRefs) {
 }
 Write-Output "Serialization guards OK: single Util\json.lua implementation (no Gameplay/UGC json.lua, no UGCSerialize refs)"
 
+# --- Static guards (T17 JSON codec convergence) --------------------------------
+# Util\json.lua is the only codec. rapidjson may still be mentioned in comments
+# (the migration note in BP_WeaponBase.lua), so comment lines are ignored.
+$ScriptOnly = Get-ChildItem -LiteralPath (Join-Path $Root "Content\Script") -Recurse -File -Filter *.lua
+$RapidjsonUsages = Select-String -LiteralPath $ScriptOnly.FullName -Pattern 'rapidjson' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Line -notmatch '^\s*--' }
+if ($RapidjsonUsages) {
+    $Detail = ($RapidjsonUsages | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }) -join "`n"
+    throw "T17 keeps Util\json.lua as the single codec; rapidjson is still used under Content\Script:`n$Detail"
+}
+Write-Output "Codec guards OK: no rapidjson usage under Content\Script (Util\json.lua is the single codec)"
+
 # --- Static guards (T18 dead-code removal) ------------------------------------
 $DeadApis = 'SaveSceneJSON|LoadSceneJSON|SerializeEditorJSON|DeserializeEditorJSON'
 # Comment lines may still name the removed APIs (historical notes are fine).
@@ -136,6 +148,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_serialization.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_golden.lua") $RootLua
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $LuaExe (Join-Path $PSScriptRoot "run_weapon_ballistics.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_registry.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
