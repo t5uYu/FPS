@@ -150,6 +150,32 @@ public:
     UFUNCTION(BlueprintPure, Category = "UGC|Editor")
     bool SupportsNativeFileDialogs() const;
 
+    //============================================================
+    // T5：预制体定义（UUGCPrefabDefinition / AssetManager）
+    //============================================================
+
+    /**
+     * 预制体定义列表（JSON 数组字符串）。
+     * 用 JSON 而不是 TArray<FUGCPlaceableInfo>：Lua 侧只需要一份扁平表，
+     * JSON 让字段/类型完全确定（含 tags / bounds / allowedModes），不依赖结构体编组约定。
+     * 内容 = AssetManager 扫描到的磁盘定义（source=asset）+ 运行时注册的定义（source=dynamic）。
+     */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Prefab")
+    FString GetPrefabDefinitionsJson() const;
+
+    /**
+     * 运行时注册一个预制体定义（GLB / runtime package），登记进 AssetManager 的
+     * PrimaryAssetType "UGCPrefab" 的 ID 空间；spawn 需要的运行期载荷（glb_path / manifest 等）仍留在 Lua 侧。
+     * @param KindName "blueprint" | "runtime_asset" | "dynamic_glb"
+     */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Prefab")
+    bool RegisterRuntimePrefabDefinition(const FString& KindName, const FString& Id, const FString& ClassPath,
+        const FString& Label, const FString& Category, const FString& Description, const TArray<FString>& Tags);
+
+    /** 该类路径是否允许 Spawn：被某个 Definition 引用 / 动态占位类 / 历史 Placeable-Gizmo 路径 */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Prefab")
+    bool IsPrefabClassPathAllowed(const FString& ClassPath) const;
+
 private:
     APlayerController* GetPC() const;
 

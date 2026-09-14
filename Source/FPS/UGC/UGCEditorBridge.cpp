@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UGCEditorBridge.h"
+#include "UGCPrefabCatalog.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/PrimitiveComponent.h"
@@ -22,8 +23,9 @@ UUGCEditorBridge::UUGCEditorBridge()
 AActor* UUGCEditorBridge::SpawnPlaceable(const FString& BlueprintPath, FVector Location, FRotator Rotation)
 {
     if (!GetOwner() || !GetOwner()->HasAuthority()) return nullptr;
-    if (!BlueprintPath.StartsWith(TEXT("/Game/_UGC/Placeables/"))
-        && !BlueprintPath.StartsWith(TEXT("/Game/_UGC/Editor/Actor/")))
+    // T5：白名单改为「预制体定义」驱动（UUGCPrefabDefinition 引用的类 + 动态占位类 + 历史路径），
+    // 不再硬编码 /Game/_UGC/Placeables/ 前缀 —— 定义可以把 ActorClass 指向任意目录。
+    if (!FUGCPrefabCatalog::IsClassPathAllowed(BlueprintPath))
     {
         UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Rejected asset path '%s'"), *BlueprintPath);
         return nullptr;
@@ -221,6 +223,26 @@ FVector UUGCEditorBridge::LineTraceScreenPositionMulti(float ScreenX, float Scre
     return bHit ? Hit.ImpactPoint : FVector::ZeroVector;
 }
 
+//============================================================
+// T5：预制体定义（UUGCPrefabDefinition / AssetManager）
+//============================================================
+
+FString UUGCEditorBridge::GetPrefabDefinitionsJson() const
+{
+    return FUGCPrefabCatalog::DefinitionsToJson(FUGCPrefabCatalog::GetDefinitions());
+}
+
+bool UUGCEditorBridge::RegisterRuntimePrefabDefinition(const FString& KindName, const FString& Id, const FString& ClassPath,
+    const FString& Label, const FString& Category, const FString& Description, const TArray<FString>& Tags)
+{
+    return FUGCPrefabCatalog::RegisterRuntimeDefinition(KindName, Id, ClassPath, Label, Category, Description, Tags);
+}
+
+bool UUGCEditorBridge::IsPrefabClassPathAllowed(const FString& ClassPath) const
+{
+    return FUGCPrefabCatalog::IsClassPathAllowed(ClassPath);
+}
+
 APlayerController* UUGCEditorBridge::GetPC() const
 {
     return Cast<APlayerController>(GetOwner());
@@ -284,7 +306,9 @@ bool UUGCEditorBridge::IsEscapeDown()
 }
 
 #if WITH_EDITOR
-static void* GetParentWindowHandle()
+// 注意：unity build 会把同一模块的多个 .cpp 编进同一个 TU，文件级 helper 必须带模块前缀，
+// 否则会与别的文件里的同名 helper 撞成「对重载函数的调用不明确」(C2668)。
+static void* GetUGCWindowHandle()
 {
     TSharedPtr<SWindow> TopWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
     if (TopWindow.IsValid() && TopWindow->GetNativeWindow().IsValid())
@@ -302,7 +326,7 @@ FString UUGCEditorBridge::ShowSaveFileDialog(const FString& Title, const FString
     if (!DP) return TEXT("");
 
     TArray<FString> OutFiles;
-    const bool bOK = DP->SaveFileDialog(GetParentWindowHandle(), Title, DefaultPath, DefaultFile, FileType, EFileDialogFlags::None, OutFiles);
+    const bool bOK = DP->SaveFileDialog(GetUGCWindowHandle(), Title, DefaultPath, DefaultFile, FileType, EFileDialogFlags::None, OutFiles);
     return (bOK && OutFiles.Num() > 0) ? OutFiles[0] : TEXT("");
 #else
     UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Native save dialog is editor-only"));
@@ -317,7 +341,7 @@ FString UUGCEditorBridge::ShowOpenFileDialog(const FString& Title, const FString
     if (!DP) return TEXT("");
 
     TArray<FString> OutFiles;
-    const bool bOK = DP->OpenFileDialog(GetParentWindowHandle(), Title, DefaultPath, TEXT(""), FileType, EFileDialogFlags::None, OutFiles);
+    const bool bOK = DP->OpenFileDialog(GetUGCWindowHandle(), Title, DefaultPath, TEXT(""), FileType, EFileDialogFlags::None, OutFiles);
     return (bOK && OutFiles.Num() > 0) ? OutFiles[0] : TEXT("");
 #else
     UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Native open dialog is editor-only"));

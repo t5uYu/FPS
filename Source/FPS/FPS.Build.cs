@@ -45,6 +45,16 @@ public class FPS : ModuleRules
 		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.Add("DesktopPlatform");
+			// T5/T3 迁移与验收工具（UGC/UGCPrefabDevCommands.cpp、UGC/UGCSmokeTestCommands.cpp，
+			// 两个文件整体都在 #if WITH_EDITOR 内）：
+			//   AssetRegistry → FAssetRegistryModule::AssetCreated（让编辑器不重启也能看到新资产）
+			//   UnrealEd      → GEditor（冒烟测试要拿 PIE 世界）
+			// 都是编辑器模块，Shipping 不参与，因此与 DesktopPlatform 同一原则放在 bBuildEditor 分支。
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"AssetRegistry",
+				"UnrealEd"
+			});
 		}
 
 		// 已移除：Niagara（全模块无任何符号引用）、JsonUtilities（无符号引用，JSON 类型来自 Json 模块）。

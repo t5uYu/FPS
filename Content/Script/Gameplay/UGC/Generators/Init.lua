@@ -25,6 +25,10 @@
 local SceneData = require("Gameplay.UGC.UGCSceneData")
 local PrefabReg = require("Gameplay.UGC.UGCPrefabRegistry")
 local Atoms     = require("Gameplay.UGC.Generators.Atoms")
+-- T3 实跑抓到的缺陷：本文件用了 8 处 UGCLog.Info，却从来没有 require 它
+-- （T13 结构化日志改造漏掉了这一处）。运行时 UGCLog 这个全局是 nil，
+-- ExportFunctions 直接抛异常 → RegisterAll 中断 → 整张 LLM 工具注册表起不来。
+local UGCLog    = require("Gameplay.UGC.UGCLog")
 
 local M = {}
 

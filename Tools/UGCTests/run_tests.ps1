@@ -64,6 +64,47 @@ if ($RapidjsonUsages) {
 }
 Write-Output "Codec guards OK: no rapidjson usage under Content\Script (Util\json.lua is the single codec)"
 
+# --- Static guards (T5 prefab definitions) ------------------------------------
+# UGCPlaceableConfig.lua is a MIGRATION FALLBACK only: the authoritative source is
+# AssetManager (UUGCPrefabDefinition, PrimaryAssetType "UGCPrefab"). Any other Lua
+# file requiring the legacy catalog means a lookup path was not migrated.
+$LegacyCatalogRefs = $ScanFiles | Where-Object { $_.FullName -notmatch 'UGCPrefabRegistry|run_prefab_definitions' } |
+    Select-String -Pattern 'UGCPlaceableConfig' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Line -notmatch '^\s*--' }
+if ($LegacyCatalogRefs) {
+    $Detail = ($LegacyCatalogRefs | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }) -join "`n"
+    throw "Only UGCPrefabRegistry may reference the legacy catalog (T5):`n$Detail"
+}
+# The bridge API the registry depends on must exist in C++ (guards against a Lua-only rename).
+$BridgeHeader = Get-Content -LiteralPath (Join-Path $Root "Source\FPS\UGC\UGCEditorBridge.h") -Raw
+foreach ($Api in @('GetPrefabDefinitionsJson', 'RegisterRuntimePrefabDefinition')) {
+    if ($BridgeHeader -notmatch $Api) { throw "UGCEditorBridge.h is missing $Api (T5)" }
+}
+$PrefabCatalog = Get-Content -LiteralPath (Join-Path $Root "Source\FPS\UGC\UGCPrefabCatalog.cpp") -Raw
+if ($PrefabCatalog -notmatch 'AddDynamicAsset') {
+    throw "UGCPrefabCatalog.cpp must register runtime prefabs via UAssetManager::AddDynamicAsset (T5)"
+}
+if ($PrefabCatalog -notmatch 'UGCPrefab') {
+    throw "UGCPrefabCatalog.cpp must use the UGCPrefab primary asset type (T5)"
+}
+Write-Output "Prefab guards OK: legacy catalog is fallback-only, definition API present, runtime prefabs use AddDynamicAsset"
+
+# --- Static guards (module table used as a bare global) -----------------------
+# A Lua file that calls UGCLog.* without requiring it will throw at runtime
+# ("attempt to index a nil value (global 'UGCLog')"), which aborted RegisterAll and
+# killed the whole LLM tool registry (found by the 2026-09-15 in-editor run).
+# Comment lines are ignored so historical notes stay allowed.
+$BareLogGlobal = Get-ChildItem -LiteralPath (Join-Path $Root "Content\Script") -Recurse -File -Filter *.lua |
+    Where-Object {
+        $content = Get-Content -LiteralPath $_.FullName -Raw
+        ($content -match '(?<![\w:\.])UGCLog\.') -and ($content -notmatch 'require\("Gameplay\.UGC\.UGCLog"\)')
+    }
+if ($BareLogGlobal) {
+    $Names = ($BareLogGlobal | ForEach-Object { $_.FullName }) -join "`n"
+    throw "These Lua files use UGCLog without requiring it:`n$Names"
+}
+Write-Output "Module global guards OK: no Lua file uses UGCLog without requiring it"
+
 # --- Static guards (T18 dead-code removal) ------------------------------------
 $DeadApis = 'SaveSceneJSON|LoadSceneJSON|SerializeEditorJSON|DeserializeEditorJSON'
 # Comment lines may still name the removed APIs (historical notes are fine).
@@ -158,6 +199,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_viewmodel.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_registry.lua") $RootLua
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $LuaExe (Join-Path $PSScriptRoot "run_prefab_definitions.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_logging.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

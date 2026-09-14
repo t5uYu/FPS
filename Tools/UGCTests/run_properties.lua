@@ -74,8 +74,11 @@ local PropertySchema = require("Gameplay.UGC.UGCPropertySchema")
 local Registry = require("Gameplay.UGC.UGCFunctionRegistry")
 local json = require("Util.json")
 
--- RegisterAll 里的生成器依赖运行时注入的全局（UnLua 侧），纯 Lua 回归里手动补齐
-UGCLog = require("Gameplay.UGC.UGCLog")
+-- 注意：这里**不能**给 UGCLog 之类补全局变量。
+-- 之前本测试为了跑通 RegisterAll 手动 `UGCLog = require(...)`，
+-- 结果掩盖了 Generators/Init.lua 真的没有 require UGCLog 的运行时缺陷
+-- （2026-09-15 编辑器实跑时 RegisterAll 抛异常、LLM 工具注册表起不来）。
+-- 现在那个文件已修正，测试也不再补全局；run_tests.ps1 里加了对应的静态守卫。
 
 local total, passed = 0, 0
 local function check(value, message) if not value then error(message or "check failed", 2) end end

@@ -1,22 +1,32 @@
 --[[
     UGCPrefabRegistry.lua
-    预制体注册表 — 打包 Catalog + Editor-only 资产发现
+    预制体注册表 — Definition 优先 + 三级兜底
 
-    运行时只信任 UGCPlaceableConfig.lua 中审核过的显式资产路径；Editor PIE
-    可扫描 Content/_UGC/Placeables 以发现开发中的新资产。玩家提供任意
-    BlueprintClass 路径的入口已禁用，后续应由带哈希和校验的内容 Provider 取代。
+    T5 起预制体的**唯一主来源**是 AssetManager 里的 `UUGCPrefabDefinition`（PrimaryDataAsset，
+    ID 形如 `UGCPrefab:Box`），它同时覆盖磁盘资产与运行时注册的动态资产（GLB / runtime package）。
+    Lua 侧只用桥接层的 `GetPrefabDefinitionsJson()` 取一份扁平列表，不再自己维护权威 Catalog。
+
+    兜底顺序（同 id 先到先得，并记录来源到 Registry.Sources）：
+      ① definition  AssetManager 扫描到的 UUGCPrefabDefinition（含运行时 AddDynamicAsset 注册）
+      ② catalog     UGCPlaceableConfig.lua —— 迁移期兜底，只为没有 Definition 的旧资产补齐
+      ③ scan        Editor 下扫描 Content/_UGC/Placeables/*.uasset，并警告「缺 Definition」
+
+    玩家提供任意 BlueprintClass 路径的入口仍然禁用。
 ]]
 
--- JSON 工具：使用统一的 json.lua 模块
-local PackagedCatalog = require("Gameplay.UGC.UGCPlaceableConfig")
+local PackagedCatalog = require("Gameplay.UGC.UGCPlaceableConfig")   -- T5：迁移期兜底，不是权威来源
 local UGCLog = require("Gameplay.UGC.UGCLog")
+local json = require("Util.json")
 
 local Registry = {}
 
 Registry.Prefabs    = {}
 Registry.Categories = {}
 Registry.Meta       = {}   -- id → { description, tags, label, category }
+Registry.Sources    = {}   -- id → "definition" | "catalog" | "scan"（诊断用）
 Registry._dynamic   = {}   -- 仅玩家自定义条目，用于序列化
+
+local _bridge = nil        -- T5：LoadDynamic 时记住桥接层，运行时注册要用
 
 -- AnimAgent 动态 glb 资产
 -- key: "dyn:{uuid}", value: { uuid, name, glb_path, provider, prompt }
@@ -117,15 +127,57 @@ local function getContentDir()
 end
 
 --============================================================
--- LoadDynamic：三步合并
+-- T5：从 AssetManager（UUGCPrefabDefinition）取定义列表
 --============================================================
 
---- @param bridge UUGCEditorBridge  用于扫描文件系统
+local function definitionsFromBridge(bridge)
+    if not bridge or not bridge.GetPrefabDefinitionsJson then return nil end
+    local ok, raw = pcall(function() return bridge:GetPrefabDefinitionsJson() end)
+    if not ok or type(raw) ~= "string" or raw == "" then
+        UGCLog.Warn("prefab_definitions_unavailable", { reason = tostring(raw) })
+        return nil
+    end
+    local decoded = json.decode(raw)
+    if type(decoded) ~= "table" then
+        UGCLog.Warn("prefab_definitions_unavailable", { reason = "decode failed" })
+        return nil
+    end
+    return decoded
+end
+
+--============================================================
+-- LoadDynamic：Definition → Catalog(迁移兜底) → Editor 扫描
+--============================================================
+
+--- @param bridge UUGCEditorBridge  取 Definition / 扫描文件系统
 function Registry:LoadDynamic(bridge)
+    _bridge = bridge
     local entries = {}   -- 最终合并结果（有序）
     local seen    = {}   -- 去重
+    local counts  = { definition = 0, catalog = 0, scan = 0 }
 
-    -- ⓪ Packaged catalog: runtime-safe source of truth for shipped assets.
+    Registry.Sources = {}
+
+    -- ⓪a 主来源：AssetManager 里的 UUGCPrefabDefinition（磁盘资产 + 运行时动态注册）
+    local definitions = definitionsFromBridge(bridge)
+    if definitions then
+        for _, def in ipairs(definitions) do
+            local path = normalizeBlueprintClassPath(def.classPath or def.path)
+            if def.id and path and not seen[def.id] then
+                seen[def.id] = true
+                entries[#entries + 1] = {
+                    id = def.id, label = def.label, category = def.category,
+                    description = def.description, tags = def.tags, path = path,
+                    version = def.version, cost = def.cost, bounds = def.bounds,
+                    allowedModes = def.allowedModes, fromDefinition = def.source,
+                }
+                Registry.Sources[def.id] = "definition"
+                counts.definition = counts.definition + 1
+            end
+        end
+    end
+
+    -- ⓪b 迁移期兜底：旧 Catalog 只为「还没有 Definition」的资产补齐
     for _, item in ipairs(PackagedCatalog) do
         local path = normalizeBlueprintClassPath(item.path or item.blueprintPath)
         if item.id and path and not seen[item.id] then
@@ -134,13 +186,16 @@ function Registry:LoadDynamic(bridge)
                 id=item.id, label=item.label, category=item.category,
                 description=item.description, tags=item.tags, path=path,
             }
+            Registry.Sources[item.id] = "catalog"
+            counts.catalog = counts.catalog + 1
         end
     end
 
-    -- ① Editor-only discovery of newly authored assets.
-    if bridge then
+    -- ① Editor-only discovery：只为缺 Definition 的新资产兜底，并明确报警
+    if bridge and bridge.FindFilesInDirectory then
         local dir   = getContentDir() .. "_UGC/Placeables/"
         local files = bridge:FindFilesInDirectory(dir, "*.uasset")
+        local missingDefinition = 0
         for i = 1, files:Num() do
             local name = files[i]:match("([^/\\]+)%.uasset$")
             if name then
@@ -148,10 +203,15 @@ function Registry:LoadDynamic(bridge)
                 if entry and not seen[entry.id] then
                     seen[entry.id] = true
                     entries[#entries+1] = entry
+                    Registry.Sources[entry.id] = "scan"
+                    counts.scan = counts.scan + 1
+                    missingDefinition = missingDefinition + 1
                 end
             end
         end
-        UGCLog.Info("prefab_scan", { discovered = #entries })
+        if missingDefinition > 0 then
+            UGCLog.Warn("prefab_definition_missing", { count = missingDefinition, dir = "_UGC/Placeables" })
+        end
     end
 
     -- Player-supplied Blueprint paths remain disabled until a dedicated
@@ -159,8 +219,48 @@ function Registry:LoadDynamic(bridge)
     Registry._dynamic = {}
 
     buildRegistry(entries)
-    UGCLog.Info("prefab_registry_ready", { total = #entries })
+    UGCLog.Info("prefab_registry_ready", {
+        total = #entries, definitions = counts.definition,
+        catalogFallback = counts.catalog, scanned = counts.scan,
+    })
 end
+
+--- 条目来源（诊断/回归用）："definition" | "catalog" | "scan" | nil
+function Registry.GetSource(id)
+    return Registry.Sources[id]
+end
+
+--- 各来源条目数
+function Registry.CountBySource()
+    local counts = { definition = 0, catalog = 0, scan = 0 }
+    for _, source in pairs(Registry.Sources) do
+        if counts[source] ~= nil then counts[source] = counts[source] + 1 end
+    end
+    return counts
+end
+
+--- T5：把运行时动态资产也登记进 AssetManager 的 PrimaryAssetId 空间。
+--- 身份与元数据（id/类路径/label/category/tags）进 Definition；spawn 需要的运行期载荷
+--- （uuid / glb_path / manifest_path / provider / prompt）留在 Lua 侧，它不是资产元数据。
+local function pushRuntimeDefinition(kind, id, classPath, meta)
+    if not _bridge or not _bridge.RegisterRuntimePrefabDefinition then return false end
+    local ok, registered = pcall(function()
+        return _bridge:RegisterRuntimePrefabDefinition(kind, id, classPath,
+            meta.label or id, meta.category or "", meta.description or "", meta.tags or {})
+    end)
+    if not ok or registered ~= true then
+        UGCLog.Warn("prefab_definition_register_failed", { prefab = tostring(id), kind = tostring(kind) })
+        return false
+    end
+    Registry.Sources[id] = "definition"
+    return true
+end
+
+Registry.DefinitionKind = {
+    blueprint     = "blueprint",
+    runtime_asset = "runtime_asset",
+    dynamic_glb   = "dynamic_glb",
+}
 
 --============================================================
 -- 持久化（只保存玩家自定义）
@@ -185,6 +285,18 @@ function Registry.GetKind(id)
     if Registry.DynamicGLB[id] then return "dynamic_glb" end
     if Registry.Prefabs[id] then return "blueprint" end
     return nil
+end
+
+--- 全部预制体 id（排序）。
+--- 注意：UGCFunctionRegistry 的 place_object 用它做 enum 白名单，
+--- 缺了它 RegisterAll 会在运行时整体抛异常（2026-09-15 PIE 实测踩到过：函数在 05a55fe 重构时被删掉）。
+function Registry.ListIDs()
+    local ids = {}
+    for id in pairs(Registry.Prefabs) do
+        ids[#ids + 1] = id
+    end
+    table.sort(ids)
+    return ids
 end
 
 --- 取动态 glb 资产数据（含 glb_path）
@@ -281,6 +393,8 @@ function Registry:RegisterRuntimeAsset(def)
         label    = def.label or def.name or def.package_id,
         category = def.category or "UGC 资产",
     }
+    -- T5：身份与元数据同时登记进 AssetManager 的 PrimaryAssetId 空间
+    pushRuntimeDefinition(Registry.DefinitionKind.runtime_asset, id, Registry.Prefabs[id], Registry.Meta[id])
 
     local catName = Registry.Meta[id].category
     for _, cat in ipairs(Registry.Categories) do
@@ -328,6 +442,8 @@ function Registry:RegisterDynamicGLB(def)
         label    = def.label or def.name or def.uuid,
         category = def.category or "AI 生成",
     }
+    -- T5：身份与元数据同时登记进 AssetManager 的 PrimaryAssetId 空间
+    pushRuntimeDefinition(Registry.DefinitionKind.dynamic_glb, id, Registry.Prefabs[id], Registry.Meta[id])
 
     local catName = Registry.Meta[id].category
     for _, cat in ipairs(Registry.Categories) do

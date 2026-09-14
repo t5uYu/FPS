@@ -1,9 +1,13 @@
 --[[
-    Packaged UGC prefab catalog.
+    Packaged UGC prefab catalog —— T5 之后这是**迁移期兜底**，不再是权威来源。
 
-    This is the runtime-safe fallback until UUGCPrefabDefinition PrimaryDataAssets
-    are introduced. Only assets that exist in the repository belong here.
-    Editor-only discovery may add newly authored assets during PIE.
+    权威来源是 AssetManager 里的 `UUGCPrefabDefinition`（PrimaryAssetId 形如 `UGCPrefab:Box`）：
+    `UGCPrefabRegistry:LoadDynamic()` 先取 Definition 列表，只有「还没有 Definition」的 id 才会
+    落到本文件；Editor 下再兜底扫描 Content/_UGC/Placeables 并报警「缺 Definition」。
+
+    保留原因：旧存档 / 旧自定义 JSON / 未及改造的资产仍需要能跑起来；
+    等所有 Placeable 都有 Definition 且 PIE 验收通过后，本文件可以删除
+    （删除时同步删掉 UGCPrefabRegistry 里的 ⓪b 段与 Tools/UGCTests/run_prefab_definitions.lua 的兜底用例）。
 ]]
 
 return {
