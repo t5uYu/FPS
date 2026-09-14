@@ -65,7 +65,7 @@ end
 
 --- 调用指定生成器，把生成结果落到 SceneData
 --- @return batchID(string) | nil, count(number) | errMsg(string)
-function M:Generate(name, params)
+function M:Generate(name, params, context)
     local def = _gens[name]
     if not def then
         return nil, "未知生成器: " .. tostring(name)
@@ -85,25 +85,35 @@ function M:Generate(name, params)
         return nil, "生成 0 个点（参数可能太小或种子问题）"
     end
 
-    local batchID = SceneData:BeginBatch()
-    local successCount = 0
-    local skipCount    = 0
-
+    local commands = {}
+    local batchID = SceneData:AllocateBatchID()
+    if not batchID then return nil, "SceneData 未初始化" end
+    local skipCount = 0
     for _, p in ipairs(points) do
         local prefab = p.prefab or default_prefab
         if not prefab or not PrefabReg.IsValid(prefab) then
             skipCount = skipCount + 1
         else
-            local loc = UE.FVector(p.x or 0, p.y or 0, p.z or 0)
-            local rot = UE.FRotator(p.pitch or 0, p.yaw or 0, p.roll or 0)
-            local sceneID = SceneData:CreateActor(prefab, loc, rot)
-            if sceneID then
-                SceneData:AddToBatch(batchID, sceneID)
-                successCount = successCount + 1
-            else
-                -- 上限或其他失败 → 提前停止，避免无谓循环
-                break
-            end
+            local transform = UE.UKismetMathLibrary.MakeTransform(
+                UE.FVector(p.x or 0, p.y or 0, p.z or 0),
+                UE.FRotator(p.pitch or 0, p.yaw or 0, p.roll or 0),
+                UE.FVector(p.scale_x or 1, p.scale_y or 1, p.scale_z or 1))
+            commands[#commands + 1] = {
+                type="CreateEntity", prefabName=prefab,
+                transform=require("Gameplay.UGC.UGCWorldProjection").ToData(transform),
+                groups={batchID},
+            }
+        end
+    end
+    if #commands == 0 then return nil, "没有有效的生成点" end
+
+    local result = SceneData:ExecuteComposite(commands, "Generate " .. tostring(name), context or {source="generator", approved=true})
+    if not result.ok then return nil, result.message end
+
+    local successCount = 0
+    for _, childResult in ipairs(result.data or {}) do
+        if childResult.ok and childResult.data and childResult.data.sceneID then
+            successCount = successCount + 1
         end
     end
 
@@ -130,8 +140,8 @@ function M:ExportFunctions(targetRegistry)
         targetRegistry:Register(funcName, {
             desc   = "[场景生成器] " .. (def.desc or name),
             params = def.params or {},
-            func   = function(p)
-                local batchID, countOrErr = self_:Generate(name, p)
+            func   = function(p, context)
+                local batchID, countOrErr = self_:Generate(name, p, context)
                 if not batchID then
                     return false, "生成失败: " .. tostring(countOrErr)
                 end

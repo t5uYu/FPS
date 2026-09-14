@@ -356,6 +356,9 @@ end
 
 function EditorCore:EnterEditMode()
     if _currentState == State.Edit then return end
+    local ProgramRunner = require("Gameplay.UGC.UGCProgramRunner")
+    ProgramRunner:CancelAllTasks()
+    if _pc and _pc.ExitPlaytestPawn then _pc:ExitPlaytestPawn() end
     _currentState  = State.Edit
     _selectedID    = nil
     _pendingPrefab = nil
@@ -376,6 +379,19 @@ end
 function EditorCore:EnterPlayMode()
     if _currentState == State.Play then return end
 
+    local blueprintEditor = UIManager:GetWindow("WBP_UGCBlueprintEditor")
+    if blueprintEditor and blueprintEditor.OnClickClose then
+        blueprintEditor:OnClickClose()
+    elseif blueprintEditor then
+        if blueprintEditor.SaveCurrentGraphToSceneData then blueprintEditor:SaveCurrentGraphToSceneData() end
+        UIManager:CloseWindow("WBP_UGCBlueprintEditor")
+    end
+
+    if _pc and _pc.EnterPlaytestPawn and not _pc:EnterPlaytestPawn() then
+        print("[UGCEditorCore] 进入试玩模式失败：PlaytestPawnClass 未配置或当前实例无 Authority")
+        return false
+    end
+
     -- 取消选中
     self:ClearSelection()
     _pendingPrefab = nil
@@ -390,8 +406,13 @@ function EditorCore:EnterPlayMode()
     -- 隐藏所有 TriggerZone 的编辑模式可视化方块
     setAllTriggerZoneDebugVisible(false)
 
+    local ProgramRunner = require("Gameplay.UGC.UGCProgramRunner")
+    ProgramRunner:CancelAllTasks()
+    ProgramRunner:TriggerGameStart()
+
     if _onStateChanged then _onStateChanged(State.Play) end
     print("[UGCEditorCore] 进入试玩模式")
+    return true
 end
 
 function EditorCore:ToggleEditMode()

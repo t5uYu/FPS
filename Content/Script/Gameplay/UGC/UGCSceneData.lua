@@ -1,700 +1,796 @@
 --[[
     UGCSceneData.lua
-    场景数据管理器（Lua 单例）
 
-    职责：
-    - 维护当前场景所有 Placeable Actor 的数据表
-    - 提供 CRUD 接口（Create/Delete/Modify/Query）
-    - 撤销/重做栈（深度 5）
-    - JSON 序列化/反序列化（保存/加载）
+    Compatibility facade over the professional UGC foundation:
+      - UGCDocument owns pure serializable state (no UObject references)
+      - UGCWorldProjection owns Entity -> Actor runtime references
+      - UGCCommandBus is the only mutation/undo boundary
 
-    对标元梦之星的 SceneDataManager，业务逻辑全在 Lua。
-    C++ Bridge 只负责引擎层的实际 Spawn/Destroy/Transform 操作。
+    Existing UI, LLM, generators, and EditorCore APIs are preserved while they
+    migrate to command-first calls.
 ]]
 
-local PrefabRegistry  = require("Gameplay.UGC.UGCPrefabRegistry")
-local UGCSerialize    = require("Gameplay.UGC.UGCSerialize")
+local PrefabRegistry = require("Gameplay.UGC.UGCPrefabRegistry")
+local UGCSerialize = require("Gameplay.UGC.UGCSerialize")
+local Document = require("Gameplay.UGC.UGCDocument")
+local CommandBus = require("Gameplay.UGC.UGCCommandBus")
+local WorldProjection = require("Gameplay.UGC.UGCWorldProjection")
 
 local SceneData = {}
 SceneData.__index = SceneData
 
---============================================================
--- 内部状态
---============================================================
+local _document = nil
+local _projection = nil
+local _commandBus = nil
+local _bridge = nil
+local _listeners = {}
+local _externalRestorers = {}
+local _externalDestroyers = {}
+local _worldRuleAdapter = nil
+local _notificationBuffer = nil
 
-local _bridge     = nil   -- UUGCEditorBridge C++ 组件
-local _nextID     = 1     -- 自增 SceneID
-local _actors     = {}    -- SceneID → { actor, prefabName, sceneID }
-local _undoStack  = {}    -- 撤销栈，最多 5 条
-local _redoStack  = {}    -- 重做栈
-local _scripts    = {}    -- 蓝图脚本：{["_level"]=graphData, [sceneID]=graphData, ...}
-local _isDirty    = false -- 脏标记：有未保存的修改时为 true
-local _batches    = {}    -- batchID(string) → { sceneID1, sceneID2, ... } 整批生成追踪
-local _nextBatch  = 1
-
-local UNDO_MAX = 5
 local ACTOR_MAX = 50
+local HISTORY_LIMIT = 64
 
---============================================================
--- 初始化
---============================================================
+local function dataToTransform(data)
+    return WorldProjection.ToTransform(data)
+end
+
+local function transformToData(transform)
+    return WorldProjection.ToData(transform)
+end
+
+local function copy(value)
+    return Document.DeepCopy(value)
+end
+
+local function deepEqual(a, b, seen)
+    if a == b then return true end
+    if type(a) ~= type(b) or type(a) ~= "table" then return false end
+    seen = seen or {}
+    if seen[a] == b then return true end
+    seen[a] = b
+    for key, value in pairs(a) do
+        if not deepEqual(value, b[key], seen) then return false end
+    end
+    for key in pairs(b) do
+        if a[key] == nil then return false end
+    end
+    return true
+end
+
+local function actorEntry(record)
+    if not record then return nil end
+    return {
+        actor = _projection and _projection:GetActor(record.sceneID) or nil,
+        prefabName = record.prefabName,
+        sceneID = record.sceneID,
+        entityId = record.entityId,
+        actorId = record.actorId,
+        programId = record.programId,
+        external = record.external,
+        metadata = copy(record.metadata),
+        tags = copy(record.tags),
+        properties = copy(record.properties),
+        transform = copy(record.transform),
+    }
+end
+
+local function notify(eventName, payload)
+    if _notificationBuffer then
+        _notificationBuffer[#_notificationBuffer + 1] = { name = eventName, payload = payload }
+        return
+    end
+    local listeners = _listeners[eventName]
+    if not listeners then return end
+    for _, listener in ipairs(listeners) do
+        local ok, err = pcall(listener, payload)
+        if not ok then print("[UGCSceneData] listener error: " .. tostring(err)) end
+    end
+end
+
+local function ensureInitialized()
+    return _document ~= nil and _projection ~= nil and _commandBus ~= nil
+end
+
+local function restoreExternal(record)
+    local metadata = record.metadata or {}
+    local restorer = _externalRestorers[metadata.kind]
+    if not restorer then return false, "未知 external 类型: " .. tostring(metadata.kind) end
+    local ok, result, err = pcall(restorer, copy(record))
+    if not ok then return false, tostring(result) end
+    return result == true, err
+end
+
+local function destroyExternal(record, projection)
+    projection = projection or _projection
+    local actor = projection and projection:GetActor(record.sceneID) or nil
+    local destroyer = _externalDestroyers[(record.metadata or {}).kind]
+    if destroyer and actor then
+        local ok, result, err = pcall(destroyer, actor, copy(record))
+        if not ok then return false, tostring(result) end
+        if result == false then return false, err or "external cleanup failed" end
+        projection:Destroy(record.sceneID, true)
+        return true
+    end
+    if projection then projection:Destroy(record.sceneID, false) end
+    return true
+end
+
+local function clearProjection(document, projection)
+    if not document or not projection then return end
+    local records = {}
+    for _, record in pairs(document.entities or {}) do records[#records + 1] = record end
+    for _, record in ipairs(records) do
+        if record.external then destroyExternal(record, projection)
+        else projection:Destroy(record.sceneID, false) end
+    end
+end
+
+local function registerHandlers()
+    _commandBus:Register("CreateEntity", {
+        validate = function(command)
+            if not command.prefabName or not PrefabRegistry.IsValid(command.prefabName) then
+                return false, "未知预制体: " .. tostring(command.prefabName)
+            end
+            if _document:Count() >= ACTOR_MAX then return false, "场景 Actor 已达到上限" end
+            return true
+        end,
+        execute = function(command)
+            local record = _document:MakeEntityRecord(command.prefabName, command.transform, command.options)
+            local ok, err = _document:InsertEntity(record)
+            if not ok then return CommandBus.Failure("duplicate_entity", err) end
+            local actor, spawnErr = _projection:Spawn(record)
+            if not actor then
+                _document:RemoveEntity(record.sceneID)
+                return CommandBus.Failure("spawn_failed", spawnErr)
+            end
+            for _, groupId in ipairs(command.groups or {}) do
+                _document:CreateGroup(groupId)
+                _document:AddToGroup(groupId, record.sceneID)
+            end
+            _document:Touch()
+            notify("changed", { kind = "entity_created", sceneID = record.sceneID })
+            return CommandBus.Success("实体已创建", actorEntry(record), {
+                type = "DeleteEntity", sceneID = record.sceneID,
+            })
+        end,
+    })
+
+    _commandBus:Register("CreateExternalEntity", {
+        validate = function(command)
+            local metadata = command.metadata or {}
+            if type(metadata.kind) ~= "string" or not _externalRestorers[metadata.kind] then
+                return false, "未知 external 类型: " .. tostring(metadata.kind)
+            end
+            if _document:Count() >= ACTOR_MAX then return false, "场景 Actor 已达到上限" end
+            if type(command.transform) ~= "table" or #command.transform ~= 9 then
+                return false, "Transform 数据无效"
+            end
+            return true
+        end,
+        execute = function(command)
+            local options = copy(command.options or {})
+            options.external = true
+            options.metadata = copy(command.metadata or {})
+            local record = _document:MakeEntityRecord(command.prefabName or "External", command.transform, options)
+            local ok, err = _document:InsertEntity(record)
+            if not ok then return CommandBus.Failure("duplicate_entity", err) end
+            local restored, restoreErr = restoreExternal(record)
+            local actor = restored and _projection:GetActor(record.sceneID) or nil
+            if not actor then
+                _document:RemoveEntity(record.sceneID)
+                return CommandBus.Failure("spawn_failed", restoreErr or "external restore failed")
+            end
+            _document:Touch()
+            notify("changed", { kind = "external_created", sceneID = record.sceneID })
+            return CommandBus.Success("外部实体已创建", actorEntry(record), {
+                type = "DeleteEntity", sceneID = record.sceneID,
+            })
+        end,
+    })
+
+    _commandBus:Register("RestoreEntity", {
+        validate = function(command)
+            if not command.record then return false, "缺少实体快照" end
+            if _document:GetEntity(command.record.sceneID) then return false, "实体 ID 已存在" end
+            return true
+        end,
+        execute = function(command)
+            local record = copy(command.record)
+            local ok, err = _document:InsertEntity(record)
+            if not ok then return CommandBus.Failure("restore_failed", err) end
+            local actor, spawnErr
+            if record.external then
+                local restored, restoreErr = restoreExternal(record)
+                actor = restored and _projection:GetActor(record.sceneID) or nil
+                spawnErr = restoreErr
+            else
+                actor, spawnErr = _projection:Spawn(record)
+            end
+            if not actor then
+                _document:RemoveEntity(record.sceneID)
+                return CommandBus.Failure("spawn_failed", spawnErr)
+            end
+            if command.program then _document.programs[record.programId] = copy(command.program) end
+            for _, groupId in ipairs(command.groups or {}) do
+                _document:CreateGroup(groupId)
+                _document:AddToGroup(groupId, record.sceneID)
+            end
+            _document:Touch()
+            notify("changed", { kind = "entity_restored", sceneID = record.sceneID })
+            return CommandBus.Success("实体已恢复", actorEntry(record), {
+                type = "DeleteEntity", sceneID = record.sceneID,
+            })
+        end,
+    })
+
+    _commandBus:Register("DeleteEntity", {
+        validate = function(command)
+            if not _document:GetEntity(tonumber(command.sceneID)) then return false, "实体不存在" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            local record = copy(_document:GetEntity(sceneID))
+            local program = copy(_document.programs[record.programId])
+            local groups = {}
+            for groupId, members in pairs(_document.generatedGroups) do
+                for _, memberId in ipairs(members) do
+                    if memberId == sceneID then groups[#groups + 1] = groupId; break end
+                end
+            end
+            if record.external and command.skipDestroy ~= true then
+                local destroyed, destroyErr = destroyExternal(record)
+                if not destroyed then return CommandBus.Failure("external_cleanup_failed", destroyErr) end
+            elseif not _projection:Destroy(sceneID, command.skipDestroy == true) then
+                return CommandBus.Failure("projection_failed", "Actor 删除失败")
+            end
+            _document:RemoveEntity(sceneID)
+            _document:Touch()
+            notify("changed", { kind = "entity_deleted", sceneID = sceneID })
+            return CommandBus.Success("实体已删除", record, {
+                type = "RestoreEntity", record = record, program = program, groups = groups,
+            })
+        end,
+    })
+
+    _commandBus:Register("SetTransform", {
+        validate = function(command)
+            if not _document:GetEntity(tonumber(command.sceneID)) then return false, "实体不存在" end
+            if type(command.transform) ~= "table" or #command.transform ~= 9 then return false, "Transform 数据无效" end
+            return true
+        end,
+        execute = function(command)
+            local sceneID = tonumber(command.sceneID)
+            local record = _document:GetEntity(sceneID)
+            local oldTransform = copy(record.transform)
+            if not _projection:SetTransform(sceneID, command.transform) then
+                return CommandBus.Failure("projection_failed", "Actor 投影不存在")
+            end
+            _document:SetTransform(sceneID, command.transform)
+            _document:Touch()
+            notify("changed", { kind = "transform_changed", sceneID = sceneID })
+            return CommandBus.Success("Transform 已更新", actorEntry(record), {
+                type = "SetTransform", sceneID = sceneID, transform = oldTransform,
+            })
+        end,
+    })
+
+    _commandBus:Register("SetWorldRule", {
+        validate = function(command)
+            if type(command.rule) ~= "string" or command.rule == "" then return false, "缺少 rule" end
+            if tonumber(command.value) == nil then return false, "规则值必须是 number" end
+            if not _worldRuleAdapter or type(_worldRuleAdapter.set) ~= "function" then
+                return false, "WorldRule adapter 未初始化"
+            end
+            return true
+        end,
+        execute = function(command)
+            local oldValue = _document.worldSettings[command.rule]
+            if oldValue == nil and _worldRuleAdapter.get then oldValue = _worldRuleAdapter.get(command.rule) end
+            if oldValue == nil or oldValue < 0 then
+                return CommandBus.Failure("invalid_rule", "未知规则: " .. tostring(command.rule))
+            end
+            local value = tonumber(command.value)
+            if not _worldRuleAdapter.set(command.rule, value) then
+                return CommandBus.Failure("rule_apply_failed", "规则应用失败: " .. tostring(command.rule))
+            end
+            local appliedValue = _worldRuleAdapter.get and _worldRuleAdapter.get(command.rule) or value
+            if appliedValue == nil or appliedValue < 0 then appliedValue = value end
+            _document.worldSettings[command.rule] = appliedValue
+            _document:Touch()
+            notify("changed", { kind = "world_rule_changed", rule = command.rule })
+            return CommandBus.Success("世界规则已更新", { rule=command.rule, value=appliedValue }, {
+                type="SetWorldRule", rule=command.rule, value=oldValue,
+            })
+        end,
+    })
+
+    _commandBus:Register("UpdateProgram", {
+        validate = function(command)
+            if type(command.programId) ~= "string" or command.programId == "" then
+                return false, "缺少 programId"
+            end
+            if type(command.data) ~= "table" then return false, "程序数据必须是 table" end
+            return true
+        end,
+        execute = function(command)
+            local oldProgram = copy(_document:GetProgram(command.programId))
+            _document:SetProgram(command.programId, command.data)
+            _document:Touch()
+            notify("changed", { kind = "program_changed", programId = command.programId })
+            local inverse = oldProgram and {
+                type = "UpdateProgram", programId = command.programId, data = oldProgram,
+            } or {
+                type = "DeleteProgram", programId = command.programId,
+            }
+            return CommandBus.Success("程序已更新", { programId = command.programId }, inverse)
+        end,
+    })
+
+    _commandBus:Register("DeleteProgram", {
+        validate = function(command)
+            if type(command.programId) ~= "string" or command.programId == "" then
+                return false, "缺少 programId"
+            end
+            if _document:GetProgram(command.programId) == nil then return false, "程序不存在" end
+            return true
+        end,
+        execute = function(command)
+            local oldProgram = copy(_document:RemoveProgram(command.programId))
+            _document:Touch()
+            notify("changed", { kind = "program_changed", programId = command.programId })
+            return CommandBus.Success("程序已删除", { programId = command.programId }, {
+                type = "UpdateProgram", programId = command.programId, data = oldProgram,
+            })
+        end,
+    })
+end
 
 function SceneData:Init(editorBridge)
-    _bridge    = editorBridge
-    _nextID    = 1
-    _actors    = {}
-    _undoStack = {}
-    _redoStack = {}
-    _scripts   = {}
-    _isDirty   = false
-    _batches   = {}
-    _nextBatch = 1
-    print("[UGCSceneData] 初始化完成")
+    if _document and _projection then clearProjection(_document, _projection) end
+    _bridge = editorBridge
+    _document = Document.New()
+    _projection = WorldProjection.New(editorBridge)
+    _commandBus = CommandBus.New({ historyLimit = HISTORY_LIMIT })
+    _notificationBuffer = nil
+    registerHandlers()
+    print("[UGCSceneData] Document/Command/Projection 初始化完成")
+end
+
+function SceneData:Shutdown()
+    if _document and _projection then clearProjection(_document, _projection) end
+    if _worldRuleAdapter and _worldRuleAdapter.reset then _worldRuleAdapter.reset() end
+    _document, _projection, _commandBus, _bridge = nil, nil, nil, nil
+    _listeners, _externalRestorers, _externalDestroyers = {}, {}, {}
+    _worldRuleAdapter, _notificationBuffer = nil, nil
+end
+
+function SceneData:GetDocument() return _document end
+function SceneData:GetCommandBus() return _commandBus end
+function SceneData:GetRevision() return _document and _document.header.revision or 0 end
+
+function SceneData:Subscribe(eventName, listener)
+    _listeners[eventName] = _listeners[eventName] or {}
+    _listeners[eventName][#_listeners[eventName] + 1] = listener
+end
+
+function SceneData:RegisterExternalAdapter(kind, restorer, destroyer)
+    if not kind or type(restorer) ~= "function" then return false end
+    _externalRestorers[kind] = restorer
+    _externalDestroyers[kind] = type(destroyer) == "function" and destroyer or nil
+    return true
+end
+
+function SceneData:RegisterExternalRestorer(kind, restorer)
+    return self:RegisterExternalAdapter(kind, restorer, nil)
+end
+
+function SceneData:RegisterWorldRuleAdapter(setter, getter, resetter)
+    if type(setter) ~= "function" or type(getter) ~= "function" then return false end
+    _worldRuleAdapter = { set=setter, get=getter, reset=resetter }
+    return true
+end
+
+function SceneData:SetWorldRule(rule, value, context)
+    return self:ExecuteCommand({type="SetWorldRule", rule=rule, value=value}, context or {source="local", approved=true})
+end
+
+function SceneData:GetWorldRule(rule)
+    local stored = _document and _document.worldSettings[rule] or nil
+    if stored ~= nil then return stored end
+    if _worldRuleAdapter and _worldRuleAdapter.get then return _worldRuleAdapter.get(rule) end
+    return -1
+end
+
+function SceneData:AttachExternalActor(sceneID, actor)
+    local record = _document and _document:GetEntity(tonumber(sceneID)) or nil
+    if not record or not record.external then return false end
+    return _projection:AttachExternal(record, actor)
+end
+
+function SceneData:ExecuteCommand(command, context, options)
+    if not ensureInitialized() then return { ok = false, code = "not_initialized", message = "SceneData 未初始化" } end
+    context = context or { source = "local" }
+    if context.baseRevision ~= nil and tonumber(context.baseRevision) ~= _document.header.revision then
+        return {
+            ok = false, code = "revision_conflict",
+            message = string.format("文档版本冲突：期望 %s，当前 %s", tostring(context.baseRevision), tostring(_document.header.revision)),
+        }
+    end
+    return _commandBus:Execute(command, context, options)
+end
+
+function SceneData:ExecuteComposite(commands, label, context)
+    if not ensureInitialized() then
+        return { ok = false, code = "not_initialized", message = "SceneData 未初始化" }
+    end
+
+    local before = {
+        revision = _document.header.revision,
+        dirty = _document.dirty,
+        nextSceneID = _document.nextSceneID,
+        nextBatchID = _document.nextBatchID,
+    }
+    local previousBuffer = _notificationBuffer
+    local events = {}
+    _notificationBuffer = events
+    local result = self:ExecuteCommand({ type = "Composite", label = label, commands = commands }, context)
+    _notificationBuffer = previousBuffer
+
+    if not result.ok then
+        if result.code ~= "rollback_failed" then
+            _document.header.revision = before.revision
+            _document.dirty = before.dirty
+            _document.nextSceneID = before.nextSceneID
+            _document.nextBatchID = before.nextBatchID
+        end
+        return result
+    end
+
+    _document.header.revision = before.revision + 1
+    _document.dirty = true
+    if previousBuffer then
+        for _, event in ipairs(events) do previousBuffer[#previousBuffer + 1] = event end
+    else
+        for _, event in ipairs(events) do notify(event.name, event.payload) end
+    end
+    return result
 end
 
 function SceneData:Clear()
-    -- 销毁所有 Actor，并立即 nil 各引用，让 UnLua userdata 尽早失去强引用
-    for _, entry in pairs(_actors) do
-        if entry.actor and UE.UKismetSystemLibrary.IsValid(entry.actor) then
-            _bridge:DestroyActor(entry.actor)
-        end
-        entry.actor = nil
-    end
-    _actors     = {}
-    _nextID     = 1
-    _undoStack  = {}
-    _redoStack  = {}
-    _scripts    = {}
-    _isDirty    = false
-    _batches    = {}
-    _nextBatch  = 1
-
-    -- ★ 强制完整 GC：
-    --   _actors = {} 令所有 actor userdata 成孤儿，但 Lua 增量 GC 不会立刻回收。
-    --   若延迟到 UWidgetBlueprintLibrary.Create 内部的内存分配才触发，
-    --   __gc（RemoveObject）与 TryBind（AddObject）并发修改 UnLua 对象图
-    --   → 读到 0xffffffffffffffff 崩溃。
-    --   在此处（安全上下文，不在 TryBind 调用链内）强制跑完，消除隐患。
-    collectgarbage("collect")
-
+    if not ensureInitialized() then return end
+    clearProjection(_document, _projection)
+    if _worldRuleAdapter and _worldRuleAdapter.reset then _worldRuleAdapter.reset() end
+    _document = Document.New()
+    _projection = WorldProjection.New(_bridge)
+    _commandBus:ClearHistory()
+    notify("changed", { kind = "document_cleared" })
     print("[UGCSceneData] 场景已清空")
 end
 
---============================================================
--- 脏标记
---============================================================
+function SceneData:IsDirty() return _document and _document.dirty or false end
+function SceneData:MarkDirty() if _document then _document:Touch() end end
+function SceneData:ClearDirty() if _document then _document.dirty = false end end
 
-function SceneData:IsDirty()   return _isDirty  end
-function SceneData:MarkDirty() _isDirty = true   end
-function SceneData:ClearDirty() _isDirty = false end
-
---============================================================
--- 蓝图脚本存取
---============================================================
-
---- 通用脚本存取（以 programId 字符串为 key）
---- programId 示例："level_main" / "actor_prog_3"
 function SceneData:SetScript(programId, data)
-    _scripts[programId] = data
-    _isDirty = true
+    if not _document then return false end
+    if deepEqual(_document:GetProgram(programId), data) then return true end
+    local result = self:ExecuteCommand({
+        type = "UpdateProgram", programId = programId, data = data,
+    }, { source = "program_editor", approved = true })
+    return result.ok
 end
-
-function SceneData:GetScript(programId)
-    return _scripts[programId]
-end
-
---- 关卡全局蓝图（快捷别名，key = "level_main"）
-function SceneData:SetLevelScript(data)
-    _scripts["level_main"] = data
-end
-
-function SceneData:GetLevelScript()
-    return _scripts["level_main"]
-end
-
---- Actor 蓝图（快捷别名，key = "actor_prog_{sceneID}"）
-function SceneData:SetActorScript(sceneID, data)
-    _scripts["actor_prog_" .. sceneID] = data
-end
-
-function SceneData:GetActorScript(sceneID)
-    return _scripts["actor_prog_" .. sceneID]
-end
-
---- 返回全部脚本表（供序列化使用）
-function SceneData:GetAllScripts()
-    return _scripts
-end
-
---- 批量加载脚本（反序列化时使用）
---- @param scriptMap table  { ["level_main"]=data, ["actor_prog_N"]=data, ... }
+function SceneData:GetScript(programId) return _document and _document:GetProgram(programId) or nil end
+function SceneData:SetLevelScript(data) return self:SetScript("level_main", data) end
+function SceneData:GetLevelScript() return self:GetScript("level_main") end
+function SceneData:SetActorScript(sceneID, data) return self:SetScript("actor_prog_" .. tostring(sceneID), data) end
+function SceneData:GetActorScript(sceneID) return self:GetScript("actor_prog_" .. tostring(sceneID)) end
+function SceneData:GetAllScripts() return _document and _document.programs or {} end
 function SceneData:LoadAllScripts(scriptMap)
-    _scripts = scriptMap or {}
+    if not _document then return end
+    _document.programs = copy(scriptMap or {})
 end
 
---============================================================
--- CRUD
---============================================================
+function SceneData:CreateActor(prefabName, location, rotation, context)
+    local transform = UE.UKismetMathLibrary.MakeTransform(
+        location, rotation or UE.FRotator(0, 0, 0), UE.FVector(1, 1, 1))
+    return self:CreateActorWithTransform(prefabName, transform, context)
+end
 
---- 放置一个新 Placeable Actor
---- @param prefabName string  预制体名称（在 PrefabRegistry 中注册的 key）
---- @param location   FVector 世界坐标
---- @param rotation   FRotator 旋转（可选，默认零旋转）
---- @return sceneID int, actor AActor
-function SceneData:CreateActor(prefabName, location, rotation)
-    if not PrefabRegistry.IsValid(prefabName) then
-        print("[UGCSceneData] CreateActor: 未知预制体 " .. tostring(prefabName))
-        return nil, nil
-    end
+function SceneData:CreateActorWithTransform(prefabName, transform, context)
+    local result = self:ExecuteCommand({
+        type = "CreateEntity", prefabName = prefabName, transform = transformToData(transform),
+    }, context or { source = "legacy_api" })
+    if not result.ok then print("[UGCSceneData] CreateActor failed: " .. tostring(result.message)); return nil, nil end
+    return result.data.sceneID, result.data.actor
+end
 
-    if self:Count() >= ACTOR_MAX then
-        print("[UGCSceneData] CreateActor: 已达到 Actor 上限 " .. ACTOR_MAX)
-        return nil, nil
-    end
-
-    local path = PrefabRegistry.GetPath(prefabName)
-    if not path then
-        print("[UGCSceneData] CreateActor: 预制体没有可用路径 " .. tostring(prefabName))
-        return nil, nil
-    end
-
-    local rot  = rotation or UE.FRotator(0, 0, 0)
-    local actor = _bridge:SpawnPlaceable(path, location, rot)
-    if not actor then
-        print("[UGCSceneData] CreateActor: Spawn 失败 prefab=" .. tostring(prefabName) .. " path=" .. tostring(path))
-        return nil, nil
-    end
-
-    local sceneID = _nextID
-    _nextID = _nextID + 1
-
-    local entry = {
-        actor      = actor,
+function SceneData:CreateExternalEntity(prefabName, transform, metadata, options, context)
+    local result = self:ExecuteCommand({
+        type = "CreateExternalEntity",
         prefabName = prefabName,
-        sceneID    = sceneID,
-        actorId    = "actor_" .. sceneID,
-        programId  = "actor_prog_" .. sceneID,
-    }
-    _actors[sceneID] = entry
-    _isDirty = true
+        transform = transform,
+        metadata = metadata,
+        options = options,
+    }, context or { source = "external", approved = true })
+    if not result.ok then return nil, result.message end
+    return result.data.sceneID, result.data.actor
+end
 
-    -- 记录撤销（保存完整信息供 Redo 恢复 — 2026-04-16 补全）
+function SceneData:RegisterExternalActor(actor, prefabName, metadata, options)
+    if not ensureInitialized() or not actor then return nil end
+    options = options or {}
     local transform = _bridge:GetActorTransform(actor)
-    self:PushUndo({ op = "Create", sceneID = sceneID, prefabName = prefabName, transform = transform })
-    _redoStack = {}
-
-    -- 如果 Actor 支持 SetProgramID（即 AUGCTriggerZone），赋值关联程序
-    pcall(function() actor:SetProgramID("actor_prog_" .. tostring(sceneID)) end)
-    -- 编辑模式下新放置的 TriggerZone 立即显示可视化方块（非 TriggerZone 的 pcall 静默忽略）
-    pcall(function() actor:SetDebugVisible(true) end)
-
-    print("[UGCSceneData] CreateActor: " .. prefabName .. " SceneID=" .. sceneID)
-    return sceneID, actor
+    local record = _document:MakeEntityRecord(prefabName or "External", transformToData(transform), {
+        sceneID = options.sceneID,
+        entityId = options.entityId,
+        external = true,
+        metadata = metadata or {},
+    })
+    local ok = _document:InsertEntity(record)
+    if not ok then return nil end
+    _projection:AttachExternal(record, actor)
+    _document:Touch()
+    notify("changed", { kind = "external_registered", sceneID = record.sceneID })
+    return record.sceneID
 end
 
---- 放置一个新 Placeable Actor（完整 Transform 版本，2026-04-16 新增）
---- @param prefabName string  预制体名称
---- @param transform  FTransform  完整变换（位置+旋转+缩放）
---- @return sceneID int, actor AActor
-function SceneData:CreateActorWithTransform(prefabName, transform)
-    if not PrefabRegistry.IsValid(prefabName) then
-        print("[UGCSceneData] CreateActorWithTransform: 未知预制体 " .. tostring(prefabName))
-        return nil, nil
-    end
-
-    if self:Count() >= ACTOR_MAX then
-        print("[UGCSceneData] CreateActorWithTransform: 已达到 Actor 上限 " .. ACTOR_MAX)
-        return nil, nil
-    end
-
-    local path = PrefabRegistry.GetPath(prefabName)
-    if not path then
-        print("[UGCSceneData] CreateActorWithTransform: 预制体没有可用路径 " .. tostring(prefabName))
-        return nil, nil
-    end
-
-    local loc, rot, _ = UE.UKismetMathLibrary.BreakTransform(transform)
-    local actor = _bridge:SpawnPlaceable(path, loc, rot)
-    if not actor then
-        print("[UGCSceneData] CreateActorWithTransform: Spawn 失败")
-        return nil, nil
-    end
-
-    -- 应用完整 Transform（含缩放）
-    _bridge:SetActorTransform(actor, transform)
-
-    local sceneID = _nextID
-    _nextID = _nextID + 1
-
-    local entry = {
-        actor      = actor,
-        prefabName = prefabName,
-        sceneID    = sceneID,
-        actorId    = "actor_" .. sceneID,
-        programId  = "actor_prog_" .. sceneID,
-    }
-    _actors[sceneID] = entry
-    _isDirty = true
-
-    -- 记录撤销（保存完整信息供 Redo 恢复 — 2026-04-16）
-    self:PushUndo({ op = "Create", sceneID = sceneID, prefabName = prefabName, transform = transform })
-    _redoStack = {}
-
-    pcall(function() actor:SetProgramID("actor_prog_" .. tostring(sceneID)) end)
-    pcall(function() actor:SetDebugVisible(true) end)
-
-    print("[UGCSceneData] CreateActorWithTransform: " .. prefabName .. " SceneID=" .. sceneID)
-    return sceneID, actor
-end
-
---- 登记一个由外部系统（如 PCG）生成的 Actor
---- 与 CreateActor 区别：不走 PrefabRegistry，不进撤销栈，不调用 Spawn
---- 用途：让 PCG 等外部生成的 Actor 也能被 SceneData 追踪、清除、序列化
---- @param actor       AActor   已存在的 Actor 实例
---- @param prefabName  string   逻辑名（如 "PCG_Generated"），仅用于显示/调试
---- @param metadata    table    重建所需元数据（如 PCG: {kind="pcg", graph_path=..., x,y,z, radius, seed}）
---- @return sceneID    int      分配的场景 ID
-function SceneData:RegisterExternalActor(actor, prefabName, metadata)
-    if not actor then
-        print("[UGCSceneData] RegisterExternalActor: actor 为 nil")
-        return nil
-    end
-
-    local sceneID = _nextID
-    _nextID = _nextID + 1
-
-    _actors[sceneID] = {
-        actor      = actor,
-        prefabName = prefabName or "External",
-        sceneID    = sceneID,
-        actorId    = "actor_" .. sceneID,
-        programId  = "actor_prog_" .. sceneID,
-        external   = true,
-        metadata   = metadata or {},
-    }
-    _isDirty = true
-
-    print(string.format("[UGCSceneData] RegisterExternalActor: %s SceneID=%d",
-        tostring(prefabName), sceneID))
-    return sceneID
-end
-
---- 仅从追踪表移除外部 Actor 条目，不调用 DestroyActor
---- 用途：当外部模块（如 PCG Bridge）已自行销毁 Actor 后，同步清理 SceneData 索引
---- @param kind  string|nil  仅移除 metadata.kind 匹配的条目；nil = 移除所有 external 条目
---- @return removed int  实际移除的条目数
-function SceneData:UnregisterExternalByKind(kind)
-    local removed = 0
-    for sceneID, entry in pairs(_actors) do
-        if entry.external then
-            if (not kind) or ((entry.metadata or {}).kind == kind) then
-                _actors[sceneID] = nil
-                removed = removed + 1
-            end
+function SceneData:DeleteExternalByKind(kind, context)
+    if not ensureInitialized() then return 0, "SceneData 未初始化" end
+    local commands = {}
+    for sceneID, record in pairs(_document.entities) do
+        if record.external and ((not kind) or (record.metadata or {}).kind == kind) then
+            commands[#commands + 1] = { type = "DeleteEntity", sceneID = sceneID }
         end
     end
-    if removed > 0 then
-        _isDirty = true
-        print(string.format("[UGCSceneData] UnregisterExternalByKind(%s): 移除 %d 个条目",
-            tostring(kind or "*"), removed))
-    end
-    return removed
+    table.sort(commands, function(a, b) return a.sceneID < b.sceneID end)
+    if #commands == 0 then return 0 end
+    local result = self:ExecuteComposite(commands, "Delete external " .. tostring(kind or "all"), context or { source = "external", approved = true })
+    if not result.ok then return 0, result.message end
+    return #commands
 end
 
---============================================================
--- 整批生成（Batch）
--- 由 Generators 调用：BeginBatch → 多次 CreateActor + AddToBatch → 后续可整批 DeleteBatch
---============================================================
+function SceneData:UnregisterExternalByKind(kind, context)
+    return self:DeleteExternalByKind(kind, context)
+end
 
 function SceneData:BeginBatch()
-    local id = "batch_" .. _nextBatch
-    _nextBatch = _nextBatch + 1
-    _batches[id] = {}
+    if not _document then return nil end
+    local id = _document:CreateGroup()
+    _document:Touch()
     return id
 end
-
+function SceneData:AllocateBatchID()
+    return _document and _document:PeekGroupID() or nil
+end
 function SceneData:AddToBatch(batchID, sceneID)
-    if not batchID or not sceneID then return end
-    local list = _batches[batchID]
-    if not list then return end
-    list[#list+1] = sceneID
+    if _document and _document:AddToGroup(batchID, sceneID) then _document:Touch(); return true end
+    return false
 end
-
-function SceneData:GetBatchActors(batchID)
-    return _batches[batchID]
+function SceneData:GetBatchActors(batchID) return _document and _document.generatedGroups[batchID] or nil end
+function SceneData:DeleteBatch(batchID, context)
+    if not _document then return 0 end
+    local members = copy(_document.generatedGroups[batchID] or {})
+    if #members == 0 then return 0 end
+    local commands = {}
+    for _, sceneID in ipairs(members) do commands[#commands + 1] = { type = "DeleteEntity", sceneID = sceneID } end
+    local result = self:ExecuteComposite(commands, "Delete " .. tostring(batchID), context or { source = "batch" })
+    if result.ok then _document:RemoveGroup(batchID); return #members end
+    return 0
 end
-
---- 整批删除：返回实际删除数量
-function SceneData:DeleteBatch(batchID)
-    local list = _batches[batchID]
-    if not list then
-        print("[UGCSceneData] DeleteBatch: 不存在 " .. tostring(batchID))
-        return 0
-    end
-    local n = 0
-    for _, sceneID in ipairs(list) do
-        if _actors[sceneID] and self:DeleteActor(sceneID) then
-            n = n + 1
-        end
-    end
-    _batches[batchID] = nil
-    print(string.format("[UGCSceneData] DeleteBatch %s 完成，删除 %d 个 Actor", batchID, n))
-    return n
-end
-
 function SceneData:ListBatches()
-    local out = {}
-    for id, list in pairs(_batches) do
-        out[#out+1] = { id = id, count = #list }
-    end
-    table.sort(out, function(a, b) return a.id < b.id end)
-    return out
+    local result = {}
+    if not _document then return result end
+    for id, members in pairs(_document.generatedGroups) do result[#result + 1] = { id = id, count = #members } end
+    table.sort(result, function(a, b) return a.id < b.id end)
+    return result
 end
 
---- 删除指定 Actor
-function SceneData:DeleteActor(sceneID)
-    local entry = _actors[sceneID]
-    if not entry then
-        print("[UGCSceneData] DeleteActor: 找不到 SceneID=" .. tostring(sceneID))
+function SceneData:DeleteActor(sceneID, context)
+    local result = self:ExecuteCommand({ type = "DeleteEntity", sceneID = sceneID }, context or { source = "legacy_api" })
+    if not result.ok then print("[UGCSceneData] DeleteActor failed: " .. tostring(result.message)) end
+    return result.ok
+end
+
+function SceneData:ModifyActor(sceneID, newTransform, context)
+    local result = self:ExecuteCommand({
+        type = "SetTransform", sceneID = sceneID, transform = transformToData(newTransform),
+    }, context or { source = "legacy_api" })
+    if not result.ok then print("[UGCSceneData] ModifyActor failed: " .. tostring(result.message)) end
+    return result.ok
+end
+
+function SceneData:QueryActor(sceneID)
+    if not _document then return nil end
+    return actorEntry(_document:GetEntity(tonumber(sceneID)))
+end
+function SceneData:Count() return _document and _document:Count() or 0 end
+function SceneData:ForEach(callback)
+    if not _document then return end
+    local ids = {}
+    for sceneID in pairs(_document.entities) do ids[#ids + 1] = sceneID end
+    table.sort(ids)
+    for _, sceneID in ipairs(ids) do callback(actorEntry(_document.entities[sceneID])) end
+end
+function SceneData:GetAllActors()
+    local result = {}
+    self:ForEach(function(entry) result[entry.sceneID] = entry end)
+    return result
+end
+
+function SceneData:PushUndo(_) print("[UGCSceneData] PushUndo 已废弃：请提交 Command") end
+local function executeHistory(operation, source)
+    if not _commandBus or not _document then return false end
+    local before = {
+        revision = _document.header.revision,
+        dirty = _document.dirty,
+        nextSceneID = _document.nextSceneID,
+        nextBatchID = _document.nextBatchID,
+    }
+    local previousBuffer = _notificationBuffer
+    local events = {}
+    _notificationBuffer = events
+    local result = operation(_commandBus, { source = source, approved = true })
+    _notificationBuffer = previousBuffer
+    if not result.ok then
+        if result.code ~= "rollback_failed" then
+            _document.header.revision = before.revision
+            _document.dirty = before.dirty
+            _document.nextSceneID = before.nextSceneID
+            _document.nextBatchID = before.nextBatchID
+        end
         return false
     end
-
-    -- 保存 Transform 供撤销恢复
-    local transform = _bridge:GetActorTransform(entry.actor)
-
-    _bridge:DestroyActor(entry.actor)
-    _actors[sceneID] = nil
-    _isDirty = true
-
-    self:PushUndo({
-        op         = "Delete",
-        sceneID    = sceneID,
-        prefabName = entry.prefabName,
-        transform  = transform,
-    })
-    _redoStack = {}
-
-    print("[UGCSceneData] DeleteActor: SceneID=" .. sceneID)
-    return true
-end
-
---- 修改 Actor 的 Transform
-function SceneData:ModifyActor(sceneID, newTransform)
-    local entry = _actors[sceneID]
-    if not entry then return false end
-
-    local oldTransform = _bridge:GetActorTransform(entry.actor)
-    _bridge:SetActorTransform(entry.actor, newTransform)
-    _isDirty = true
-
-    self:PushUndo({
-        op           = "Modify",
-        sceneID      = sceneID,
-        oldTransform = oldTransform,
-        newTransform = newTransform,
-    })
-    _redoStack = {}
-    return true
-end
-
---- 查询 Actor 数据
-function SceneData:QueryActor(sceneID)
-    return _actors[sceneID]
-end
-
---- 当前 Actor 总数
-function SceneData:Count()
-    local n = 0
-    for _ in pairs(_actors) do n = n + 1 end
-    return n
-end
-
---- 遍历所有 Actor（callback(entry)）
-function SceneData:ForEach(callback)
-    for _, entry in pairs(_actors) do
-        callback(entry)
+    _document.header.revision = before.revision + 1
+    _document.dirty = true
+    if previousBuffer then
+        for _, event in ipairs(events) do previousBuffer[#previousBuffer + 1] = event end
+    else
+        for _, event in ipairs(events) do notify(event.name, event.payload) end
     end
-end
-
---- 返回全部 Actor 表（供 EditorCore:setAllTriggerZoneDebugVisible 等使用）
-function SceneData:GetAllActors()
-    return _actors
-end
-
---============================================================
--- 撤销/重做
---============================================================
-
-function SceneData:PushUndo(record)
-    table.insert(_undoStack, record)
-    if #_undoStack > UNDO_MAX then
-        table.remove(_undoStack, 1)
-    end
+    return true
 end
 
 function SceneData:Undo()
-    if #_undoStack == 0 then
-        print("[UGCSceneData] 撤销栈为空")
-        return false
-    end
-
-    local record = table.remove(_undoStack)
-    table.insert(_redoStack, record)
-
-    if record.op == "Create" then
-        -- 撤销创建 = 删除（不入撤销栈）
-        local entry = _actors[record.sceneID]
-        if entry then
-            _bridge:DestroyActor(entry.actor)
-            _actors[record.sceneID] = nil
-        end
-
-    elseif record.op == "Delete" then
-        -- 撤销删除 = 重新 Spawn
-        local path = PrefabRegistry.GetPath(record.prefabName)
-        local loc, rot, _ = UE.UKismetMathLibrary.BreakTransform(record.transform)
-        local actor = _bridge:SpawnPlaceable(path, loc, rot)
-        if actor then
-            _bridge:SetActorTransform(actor, record.transform)
-            _actors[record.sceneID] = {
-                actor      = actor,
-                prefabName = record.prefabName,
-                sceneID    = record.sceneID,
-            }
-        end
-
-    elseif record.op == "Modify" then
-        -- 撤销修改 = 恢复旧 Transform
-        local entry = _actors[record.sceneID]
-        if entry then
-            _bridge:SetActorTransform(entry.actor, record.oldTransform)
-        end
-    end
-
-    _isDirty = true
-    print("[UGCSceneData] Undo: " .. record.op)
-    return true
+    return executeHistory(function(bus, context) return bus:Undo(context) end, "undo")
 end
-
 function SceneData:Redo()
-    if #_redoStack == 0 then
-        print("[UGCSceneData] 重做栈为空")
-        return false
-    end
-
-    local record = table.remove(_redoStack)
-
-    if record.op == "Create" then
-        -- Redo Create：重新 Spawn 并用原 sceneID（2026-04-16 补全）
-        -- 注意：record 需包含 prefabName 和 transform，旧记录若缺失则跳过
-        if not record.prefabName or not record.transform then
-            print("[UGCSceneData] Redo Create: 旧记录缺少 prefabName/transform，无法恢复，跳过")
-        else
-            local path = PrefabRegistry.GetPath(record.prefabName)
-            if path then
-                local loc, rot, _ = UE.UKismetMathLibrary.BreakTransform(record.transform)
-                local actor = _bridge:SpawnPlaceable(path, loc, rot)
-                if actor then
-                    _bridge:SetActorTransform(actor, record.transform)
-                    _actors[record.sceneID] = {
-                        actor      = actor,
-                        prefabName = record.prefabName,
-                        sceneID    = record.sceneID,
-                        actorId    = "actor_" .. record.sceneID,
-                        programId  = "actor_prog_" .. record.sceneID,
-                    }
-                    pcall(function() actor:SetProgramID("actor_prog_" .. tostring(record.sceneID)) end)
-                    pcall(function() actor:SetDebugVisible(true) end)
-                else
-                    print("[UGCSceneData] Redo Create: Spawn 失败 prefab=" .. tostring(record.prefabName))
-                end
-            else
-                print("[UGCSceneData] Redo Create: 预制体路径不存在 " .. tostring(record.prefabName))
-            end
-        end
-
-    elseif record.op == "Delete" then
-        local entry = _actors[record.sceneID]
-        if entry then
-            _bridge:DestroyActor(entry.actor)
-            _actors[record.sceneID] = nil
-        end
-
-    elseif record.op == "Modify" then
-        local entry = _actors[record.sceneID]
-        if entry then
-            _bridge:SetActorTransform(entry.actor, record.newTransform)
-        end
-    end
-
-    _isDirty = true
-    table.insert(_undoStack, record)
-    print("[UGCSceneData] Redo: " .. record.op)
-    return true
+    return executeHistory(function(bus, context) return bus:Redo(context) end, "redo")
 end
 
---============================================================
--- scene.json 序列化（v2）
--- 格式：{
---   "version": 2,
---   "nextID":  N,
---   "levelProgramId": "level_main",
---   "actors": [
---     { "sceneID":1, "actorId":"actor_1", "programId":"actor_prog_1",
---       "prefab":"Box", "t":[px,py,pz,pitch,yaw,roll,sx,sy,sz] },
---     ...
---   ]
--- }
---============================================================
-
-function SceneData:SerializeToJSON()
-    local actorList = {}
-
-    for sceneID, entry in pairs(_actors) do
-        if entry.actor and UE.UKismetSystemLibrary.IsValid(entry.actor) then
-            local t             = _bridge:GetActorTransform(entry.actor)
-            local loc, rot, scl = UE.UKismetMathLibrary.BreakTransform(t)
-
-            local rec = {
-                sceneID   = sceneID,
-                actorId   = entry.actorId   or ("actor_" .. sceneID),
-                programId = entry.programId or ("actor_prog_" .. sceneID),
-                prefab    = entry.prefabName,
-                t         = { loc.X, loc.Y, loc.Z,
-                              rot.Pitch, rot.Yaw, rot.Roll,
-                              scl.X, scl.Y, scl.Z },
-            }
-            -- 外部生成 Actor（PCG 等）：写入元数据，加载时由对应模块重放
-            if entry.external then
-                rec.external = true
-                rec.metadata = entry.metadata or {}
-            end
-            table.insert(actorList, rec)
-        end
-    end
-
-    local root = {
-        version        = 2,
-        nextID         = _nextID,
-        levelProgramId = "level_main",
-        actors         = actorList,
+function SceneData:SerializePackageTable(editorState)
+    return {
+        packageVersion = 1,
+        savedAt = os.time and os.time() or 0,
+        document = _document and _document:Snapshot() or Document.New():Snapshot(),
+        editor = copy(editorState or {}),
     }
-    return UGCSerialize.encode(root)
 end
 
-function SceneData:DeserializeFromJSON(json)
-    self:Clear()
+function SceneData:DeserializePackageTable(package)
+    if type(package) ~= "table" or type(package.document) ~= "table" then return false, "存档缺少 document" end
 
-    local data = UGCSerialize.decode(json)
-    if not data then
-        print("[UGCSceneData] DeserializeFromJSON: decode 失败")
-        return
-    end
+    local oldDocument, oldProjection = _document, _projection
+    local loaded, loadError = Document.FromSnapshot(package.document)
+    if not loaded then return false, "Document 校验失败: " .. tostring(loadError) end
+    local stagedProjection = WorldProjection.New(_bridge)
+    _document, _projection = loaded, stagedProjection
 
-    local ver = data.version or 1
-    if data.nextID then _nextID = data.nextID end
-
-    -- v1 格式（旧版）：actors 为整数 id
-    -- v2 格式：actors 含 actorId / programId 字符串
-    -- v2+：a.external=true 时表示外部生成（PCG 等），由 metadata.kind 路由到对应模块重放
-    for _, a in ipairs(data.actors or {}) do
-        local sceneID  = a.sceneID or a.id   -- 兼容 v1 的 "id" 字段
-        local prefab   = a.prefab or a.prefabName
-        local nums     = a.t or {}
-
-        if a.external and a.metadata then
-            -- 外部 Actor 重放：当前支持 PCG，后续可扩展其他类型
-            local md = a.metadata
-            if md.kind == "pcg" then
-                local UGCRegistry = require("Gameplay.UGC.UGCFunctionRegistry")
-                local ok, msg = UGCRegistry:Call("pcg_generate", {
-                    x          = tonumber(md.x) or 0,
-                    y          = tonumber(md.y) or 0,
-                    z          = tonumber(md.z) or 0,
-                    radius     = tonumber(md.radius) or 1000,
-                    seed       = tonumber(md.seed) or 0,
-                    graph_path = tostring(md.graph_path or ""),
-                })
-                if not ok then
-                    print("[UGCSceneData] PCG 重放失败 SceneID=" .. tostring(sceneID) .. ": " .. tostring(msg))
-                end
-            else
-                print("[UGCSceneData] 未知外部 Actor 类型: " .. tostring(md.kind))
-            end
-
-        elseif sceneID and prefab and #nums == 9 then
-            local loc       = UE.FVector(nums[1], nums[2], nums[3])
-            local rot       = UE.FRotator(nums[4], nums[5], nums[6])
-            local scl       = UE.FVector(nums[7], nums[8], nums[9])
-            local transform = UE.UKismetMathLibrary.MakeTransform(loc, rot, scl)
-
-            local path = PrefabRegistry.GetPath(prefab)
-            if path then
-                local actor = _bridge:SpawnPlaceable(path, loc, rot)
-                if actor then
-                    _bridge:SetActorTransform(actor, transform)
-                    _actors[sceneID] = {
-                        actor      = actor,
-                        prefabName = prefab,
-                        sceneID    = sceneID,
-                        actorId    = a.actorId   or ("actor_" .. sceneID),
-                        programId  = a.programId or ("actor_prog_" .. sceneID),
-                    }
-                    print("[UGCSceneData] 加载 Actor: " .. prefab .. " ID=" .. sceneID)
-                end
-            end
+    for _, record in ipairs(package.document.entities or {}) do
+        local stored = loaded:GetEntity(record.sceneID)
+        local actor, err
+        if stored.external then
+            local restored
+            restored, err = restoreExternal(stored)
+            actor = restored and stagedProjection:GetActor(stored.sceneID) or nil
+        else
+            actor, err = stagedProjection:Spawn(stored)
+        end
+        if not actor then
+            clearProjection(loaded, stagedProjection)
+            _document, _projection = oldDocument, oldProjection
+            return false, "实体恢复失败 SceneID=" .. tostring(record.sceneID) .. ": " .. tostring(err)
         end
     end
 
-    _isDirty = false   -- 刚加载的数据视为"已保存"
-    collectgarbage("collect")   -- 清掉 DeserializeFromJSON 产生的临时 userdata，
-                                -- 避免延迟到下次 widget Create 的内存分配时触发 GC
-    print("[UGCSceneData] 反序列化完成 v" .. ver .. "，Actor 数量: " .. self:Count())
+    if _worldRuleAdapter and _worldRuleAdapter.reset then _worldRuleAdapter.reset() end
+    for rule, value in pairs(loaded.worldSettings or {}) do
+        if not _worldRuleAdapter or not _worldRuleAdapter.set(rule, value) then
+            clearProjection(loaded, stagedProjection)
+            _document, _projection = oldDocument, oldProjection
+            if _worldRuleAdapter and _worldRuleAdapter.reset then
+                _worldRuleAdapter.reset()
+                for oldRule, oldValue in pairs(oldDocument.worldSettings or {}) do
+                    _worldRuleAdapter.set(oldRule, oldValue)
+                end
+            end
+            return false, "世界规则恢复失败: " .. tostring(rule)
+        end
+    end
+
+    clearProjection(oldDocument, oldProjection)
+    _commandBus:ClearHistory()
+    loaded.dirty = false
+    notify("changed", { kind = "document_loaded" })
+    return true, "loaded"
 end
 
---============================================================
--- programs.json 序列化
--- 格式：{
---   "version": 1,
---   "programs": {
---     "level_main":      { nodes={...}, connections={...}, nextID=N },
---     "actor_prog_1":    { ... },
---     ...
---   }
--- }
---============================================================
+-- Legacy scene.json compatibility.
+function SceneData:SerializeToJSON()
+    local snapshot = _document and _document:Snapshot() or Document.New():Snapshot()
+    local actors = {}
+    for _, record in ipairs(snapshot.entities) do
+        actors[#actors + 1] = {
+            sceneID = record.sceneID,
+            entityId = record.entityId,
+            actorId = record.actorId,
+            programId = record.programId,
+            prefab = record.prefabName,
+            t = record.transform,
+            external = record.external or nil,
+            metadata = record.external and record.metadata or nil,
+        }
+    end
+    return UGCSerialize.encode({
+        version = 3,
+        documentId = snapshot.header.documentId,
+        revision = snapshot.header.revision,
+        nextID = snapshot.nextSceneID,
+        nextBatchID = snapshot.nextBatchID,
+        actors = actors,
+        generatedGroups = snapshot.generatedGroups,
+        worldSettings = snapshot.worldSettings,
+    })
+end
+
+function SceneData:DeserializeFromJSON(encoded)
+    local data = UGCSerialize.decode(encoded)
+    if type(data) ~= "table" then return false, "scene.json decode 失败" end
+    local entities = {}
+    for _, actor in ipairs(data.actors or {}) do
+        entities[#entities + 1] = {
+            sceneID = actor.sceneID or actor.id,
+            entityId = actor.entityId,
+            actorId = actor.actorId,
+            programId = actor.programId,
+            prefabName = actor.prefab or actor.prefabName,
+            transform = actor.t,
+            external = actor.external,
+            metadata = actor.metadata,
+        }
+    end
+    return self:DeserializePackageTable({
+        packageVersion = 1,
+        document = {
+            header = {
+                documentId = data.documentId,
+                schemaVersion = tonumber(data.version) or 1,
+                revision = tonumber(data.revision) or 0,
+                contentVersion = "legacy",
+            },
+            nextSceneID = data.nextID,
+            nextBatchID = data.nextBatchID,
+            entities = entities,
+            programs = {},
+            generatedGroups = data.generatedGroups or {},
+            worldSettings = data.worldSettings or {},
+        },
+    })
+end
 
 function SceneData:SerializeProgramsJSON()
-    local root = {
-        version  = 1,
-        programs = _scripts,
-    }
-    return UGCSerialize.encode(root)
+    return UGCSerialize.encode({ version = 2, programs = copy(_document and _document.programs or {}) })
 end
-
-function SceneData:DeserializeProgramsJSON(json)
-    if not json or json == "" then return end
-    local data = UGCSerialize.decode(json)
-    if data and data.programs then
-        _scripts = data.programs
-        _isDirty = false   -- 刚加载的脚本视为"已保存"
-        print("[UGCSceneData] programs 加载完成，图数量: " .. (function()
-            local n = 0; for _ in pairs(_scripts) do n = n + 1 end; return n
-        end)())
-    end
+function SceneData:DeserializeProgramsJSON(encoded)
+    local data = UGCSerialize.decode(encoded)
+    if type(data) ~= "table" or type(data.programs) ~= "table" then return false end
+    _document.programs = copy(data.programs)
+    _document.dirty = false
+    return true
 end
-
---============================================================
--- editor.json 序列化（UI 状态存根，Day 5 扩展）
--- 当前只存版本号，后续可加展开/折叠、摄像机位置等
---============================================================
-
-function SceneData:SerializeEditorJSON()
-    return UGCSerialize.encode({ version = 1, blueprintEditors = {} })
-end
-
-function SceneData:DeserializeEditorJSON(json)
-    -- 暂无需恢复的 UI 状态
-end
+function SceneData:SerializeEditorJSON() return UGCSerialize.encode({ version = 1, blueprintEditors = {} }) end
+function SceneData:DeserializeEditorJSON(_) return true end
 
 return SceneData

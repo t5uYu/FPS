@@ -25,9 +25,13 @@ public class FPS : ModuleRules
 			"UnLua",
 			"HTTP",
 			"Json",
-			"DesktopPlatform",
 			"ApplicationCore",
 			"PCG"
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("DesktopPlatform");
+		}
 	}
 }

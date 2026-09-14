@@ -18,6 +18,7 @@ UUGCPCGBridge::UUGCPCGBridge()
 
 AActor* UUGCPCGBridge::Generate(FVector Location, float Radius, int32 Seed, const FString& GraphPath)
 {
+    if (!GetOwner() || !GetOwner()->HasAuthority()) return nullptr;
     UWorld* World = GetWorld();
     if (!World)
     {
@@ -25,14 +26,16 @@ AActor* UUGCPCGBridge::Generate(FVector Location, float Radius, int32 Seed, cons
         return nullptr;
     }
 
-    // 解析 PCG Graph
-    UPCGGraphInterface* Graph = nullptr;
+    // Runtime callers may only use the reviewed default graph. Arbitrary asset
+    // paths are not an acceptable capability boundary for UGC/AI input.
     if (!GraphPath.IsEmpty())
     {
-        Graph = Cast<UPCGGraphInterface>(
-            StaticLoadObject(UPCGGraphInterface::StaticClass(), nullptr, *GraphPath));
+        UE_LOG(LogTemp, Warning, TEXT("[UGCPCGBridge] Generate: custom GraphPath is disabled"));
+        return nullptr;
     }
-    if (!Graph && DefaultPCGGraph.IsValid())
+
+    UPCGGraphInterface* Graph = nullptr;
+    if (!DefaultPCGGraph.IsNull())
     {
         Graph = DefaultPCGGraph.LoadSynchronous();
     }
@@ -43,8 +46,8 @@ AActor* UUGCPCGBridge::Generate(FVector Location, float Radius, int32 Seed, cons
     }
 
     // 参数默认值
-    float UseRadius = (Radius > 0.f) ? Radius : DefaultRadius;
-    int32 UseSeed   = (Seed != 0) ? Seed : DefaultSeed;
+    const float UseRadius = FMath::Clamp((Radius > 0.f) ? Radius : DefaultRadius, 100.f, 10000.f);
+    int32 UseSeed = (Seed != 0) ? Seed : DefaultSeed;
     if (UseSeed == 0)
     {
         UseSeed = FMath::RandRange(1, 999999);
@@ -93,7 +96,8 @@ AActor* UUGCPCGBridge::Generate(FVector Location, float Radius, int32 Seed, cons
 
 bool UUGCPCGBridge::Cleanup(AActor* PCGActor)
 {
-    if (!PCGActor) return false;
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !PCGActor
+        || !ActivePCGActors.Contains(PCGActor)) return false;
 
     // 找到 PCG Component 并清理
     UPCGComponent* PCGComp = PCGActor->FindComponentByClass<UPCGComponent>();
@@ -111,6 +115,7 @@ bool UUGCPCGBridge::Cleanup(AActor* PCGActor)
 
 void UUGCPCGBridge::CleanupAll()
 {
+    if (!GetOwner() || !GetOwner()->HasAuthority()) return;
     for (AActor* Actor : ActivePCGActors)
     {
         if (Actor && IsValid(Actor))

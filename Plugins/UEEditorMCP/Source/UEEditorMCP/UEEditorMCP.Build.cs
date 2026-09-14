@@ -36,6 +36,9 @@ public class UEEditorMCP : ModuleRules
 			"InputBlueprintNodes",
 			"EditorScriptingUtilities",
 			"AssetTools",
+			"ContentBrowser",
+			"ToolMenus",
+			"SourceCodeAccess",
 			"SourceControl",      // For Diff Against Depot (ISourceControlModule, ISourceControlProvider, etc.)
 			"MaterialEditor",     // For UMaterialEditingLibrary and material expression manipulation
 			"RenderCore",         // For material shader compilation

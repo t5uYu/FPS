@@ -21,14 +21,9 @@ enum class EUGCLLMModel : uint8
 /**
  * UUGCHttpClient
  *
- * Claude API HTTP 客户端组件，挂载在 PlayerController 上。
- * 封装 Anthropic Messages API 调用，通过 BlueprintNativeEvent
- * 将结果回调给 Lua 层（LLMGateway.lua 覆盖 OnMessageComplete）。
- *
- * 使用方式：
- *   1. 在 BP_FPSPlayerController 的 UGCHttpClient 组件 Details 里填入 APIKey
- *   2. Lua 调用 HttpClient:SendMessage(userText, toolsJSON)
- *   3. Lua 覆盖 OnMessageComplete(responseJSON) 解析结果
+ * OpenAI-compatible LLM HTTP client attached to the UGC PlayerController.
+ * Authentication is resolved at runtime from FPS_UGC_LLM_API_KEY. A transient
+ * override exists only for local developer sessions and is never serialized.
  */
 UCLASS(ClassGroup = "UGC", meta = (BlueprintSpawnableComponent))
 class FPS_API UUGCHttpClient : public UActorComponent
@@ -39,16 +34,13 @@ public:
     UUGCHttpClient();
 
     //-------------------------------------------------------------------
-    // 配置（在蓝图 Defaults 里填写，不硬编码）
+    // Configuration
     //-------------------------------------------------------------------
 
-    /** Anthropic API Key（sk-ant-...） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UGC|LLM|Config")
-    FString APIKey;
-
-    /** API 端点，默认 DeepSeek（OpenAI 兼容格式） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UGC|LLM|Config")
-    FString APIEndpoint = TEXT("https://api.deepseek.com/v1/chat/completions");
+    /** Optional process-local override for development. Never saved to assets. */
+    UPROPERTY(Transient, BlueprintReadWrite, Category = "UGC|LLM|Development",
+        meta = (DisplayName = "API Key Override (Transient)"))
+    FString APIKeyOverride;
 
     /** 使用的模型（下拉选择） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UGC|LLM|Config")
@@ -131,6 +123,10 @@ private:
 
     /** 构建请求体 JSON（完整 messages 数组，由调用方提供历史） */
     FString BuildRequestBodyWithMessages(const FString& MessagesJSON, const FString& ToolsJSON) const;
+
+    /** Resolve credentials and provider endpoint without asset-configured secrets/hosts. */
+    FString ResolveAPIKey() const;
+    FString ResolveAPIEndpoint() const;
 
     /** HTTP 响应回调 */
     void OnHttpResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess);

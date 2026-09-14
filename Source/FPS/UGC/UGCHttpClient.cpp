@@ -7,6 +7,7 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#include "HAL/PlatformMisc.h"
 
 UUGCHttpClient::UUGCHttpClient()
 {
@@ -14,15 +15,38 @@ UUGCHttpClient::UUGCHttpClient()
 }
 
 // -----------------------------------------------------------------------
-// 发送请求
+// Request dispatch
 // -----------------------------------------------------------------------
+
+FString UUGCHttpClient::ResolveAPIKey() const
+{
+    if (!APIKeyOverride.IsEmpty())
+    {
+        return APIKeyOverride;
+    }
+    return FPlatformMisc::GetEnvironmentVariable(TEXT("FPS_UGC_LLM_API_KEY"));
+}
+
+FString UUGCHttpClient::ResolveAPIEndpoint() const
+{
+    switch (Model)
+    {
+        case EUGCLLMModel::Qwen_Plus:
+        case EUGCLLMModel::Qwen_Turbo:
+        case EUGCLLMModel::Qwen_Max:
+            return TEXT("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+        default:
+            return TEXT("https://api.deepseek.com/v1/chat/completions");
+    }
+}
 
 void UUGCHttpClient::SendMessage(const FString& UserMessage, const FString& ToolsJSON)
 {
+    const FString APIKey = ResolveAPIKey();
     if (APIKey.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("[UGCHttpClient] APIKey 未配置，请在蓝图 Defaults 中填写"));
-        OnMessageError(TEXT("APIKey 未配置"));
+        UE_LOG(LogTemp, Warning, TEXT("[UGCHttpClient] FPS_UGC_LLM_API_KEY 未配置"));
+        OnMessageError(TEXT("LLM API Key 未配置（请设置环境变量 FPS_UGC_LLM_API_KEY）"));
         return;
     }
 
@@ -35,7 +59,7 @@ void UUGCHttpClient::SendMessage(const FString& UserMessage, const FString& Tool
     FString Body = BuildRequestBody(UserMessage, ToolsJSON);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-    Request->SetURL(APIEndpoint);
+    Request->SetURL(ResolveAPIEndpoint());
     Request->SetVerb(TEXT("POST"));
     Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
     Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *APIKey));
@@ -58,10 +82,11 @@ void UUGCHttpClient::SendMessage(const FString& UserMessage, const FString& Tool
 
 void UUGCHttpClient::SendMessageWithHistory(const FString& MessagesJSON, const FString& ToolsJSON)
 {
+    const FString APIKey = ResolveAPIKey();
     if (APIKey.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("[UGCHttpClient] APIKey 未配置，请在蓝图 Defaults 中填写"));
-        OnMessageError(TEXT("APIKey 未配置"));
+        UE_LOG(LogTemp, Warning, TEXT("[UGCHttpClient] FPS_UGC_LLM_API_KEY 未配置"));
+        OnMessageError(TEXT("LLM API Key 未配置（请设置环境变量 FPS_UGC_LLM_API_KEY）"));
         return;
     }
 
@@ -74,7 +99,7 @@ void UUGCHttpClient::SendMessageWithHistory(const FString& MessagesJSON, const F
     FString Body = BuildRequestBodyWithMessages(MessagesJSON, ToolsJSON);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-    Request->SetURL(APIEndpoint);
+    Request->SetURL(ResolveAPIEndpoint());
     Request->SetVerb(TEXT("POST"));
     Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
     Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *APIKey));

@@ -4,19 +4,22 @@
 
 #include "CoreMinimal.h"
 #include "FPS/FPSPlayerController.h"
+#include "UGCEventRouterSubsystem.h"
 #include "UGCPlayerController.generated.h"
 
 class UUGCFunctionBridge;
 class UUGCHttpClient;
 class UUGCEditorBridge;
 class UUGCPCGBridge;
+class UUGCStorageBridge;
 
 /**
  * AUGCPlayerController
  *
  * 继承自 AFPSPlayerController，附加 UGC 相关组件：
  *   - UUGCFunctionBridge : 原子操作白名单（GAS / 武器 / 规则）
- *   - UUGCHttpClient     : Claude API HTTP 客户端
+ *   - UUGCHttpClient     : OpenAI-compatible LLM HTTP 客户端
+ *   - UUGCStorageBridge  : 原子 JSON 存储边界
  *
  * 设计意图：
  *   保持基类 AFPSPlayerController 纯净（仅输入/菜单/会话）。
@@ -53,6 +56,18 @@ public:
     /** 获取 PCG 过程化生成组件（2026-04-16 新增） */
     UFUNCTION(BlueprintCallable, Category = "UGC")
     UUGCPCGBridge* GetUGCPCGBridge() const { return PCGBridge; }
+
+    /** 获取运行时安全的 UGC JSON 存储组件。 */
+    UFUNCTION(BlueprintCallable, Category = "UGC")
+    UUGCStorageBridge* GetUGCStorageBridge() const { return StorageBridge; }
+
+    /** 从 Authoring Pawn 切换到独立 Gameplay Pawn；仅 Authority 执行。 */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Playtest")
+    bool EnterPlaytestPawn();
+
+    /** 销毁 Gameplay Pawn 并恢复 Authoring Pawn；仅 Authority 执行。 */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Playtest")
+    bool ExitPlaytestPawn();
 
     /** 切换编辑器（F9），Lua 可覆盖 */
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UGC")
@@ -95,6 +110,10 @@ public:
     virtual void OnLLMError_Implementation(const FString& ErrorMessage) {}
 
 protected:
+    /** Playtest 时生成的 Gameplay Pawn 类；默认指向 BP_FPSPlayer。 */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UGC|Playtest")
+    TSubclassOf<APawn> PlaytestPawnClass;
+
     /** F9 → 切换编辑器 InputAction */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|UGC")
     UInputAction* ToggleEditorAction;
@@ -103,7 +122,13 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input|UGC")
     UInputAction* EditorClickAction;
 
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void SetupInputComponent() override;
+
+    UFUNCTION()
+    void HandleUGCRuntimeEvent(const FUGCRuntimeEvent& Event);
+
     void HandleToggleEditorInput();
     void HandleEditorClickInput();
 
@@ -112,7 +137,7 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UGC")
     UUGCFunctionBridge* UGCBridge;
 
-    /** Claude/DeepSeek API HTTP 客户端组件 */
+    /** OpenAI-compatible LLM HTTP 客户端组件 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UGC")
     UUGCHttpClient* UGCHttpClient;
 
@@ -123,4 +148,14 @@ protected:
     /** PCG 过程化生成组件（2026-04-16 新增） */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UGC")
     UUGCPCGBridge* PCGBridge;
+
+    /** UGC 文档和本地 UI 状态的原子 JSON 存储。 */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UGC")
+    UUGCStorageBridge* StorageBridge;
+
+    UPROPERTY(Transient)
+    TObjectPtr<APawn> AuthoringPawn;
+
+    UPROPERTY(Transient)
+    TObjectPtr<APawn> ActivePlaytestPawn;
 };

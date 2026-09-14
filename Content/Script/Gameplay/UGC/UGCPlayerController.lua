@@ -13,6 +13,7 @@ local UGCRegistry    = require("Gameplay.UGC.UGCFunctionRegistry")
 local LLMGateway     = require("Gameplay.UGC.LLMGateway")
 local EditorCore     = require("Gameplay.UGC.UGCEditorCore")
 local ProgramRunner  = require("Gameplay.UGC.UGCProgramRunner")
+local Persistence    = require("Gameplay.UGC.UGCPersistence")
 
 local M = UnLua.Class("Gameplay.PlayerController")
 local Base = require("Gameplay.PlayerController")
@@ -26,20 +27,23 @@ function M:ReceiveBeginPlay()
     Base.ReceiveBeginPlay(self)
 
     -- 初始化 UGC 层
-    UGCRegistry:Init(self)
-    LLMGateway:Init(self)
     EditorCore:Init(self)
+    Persistence:Init(self:GetUGCStorageBridge())
+    UGCRegistry:Init(self)
     ProgramRunner:Init(self)
-
-    -- 延迟 5 帧后触发 Event_OnGameStart（等所有蓝图加载完毕）
-    self:ScheduleCallback(function()
-        ProgramRunner:TriggerGameStart()
-    end, 5)
+    LLMGateway:Init(self)
 
     print("[UGCPlayerController] UGC 层初始化完成")
 end
 
 -- F9 切换关卡编辑器
+function M:ReceiveEndPlay()
+    ProgramRunner:CancelAllTasks()
+    LLMGateway:Shutdown()
+    require("Gameplay.UGC.UGCSceneData"):Shutdown()
+    Base.ReceiveEndPlay(self)
+end
+
 function M:ToggleEditor()
     EditorCore:ToggleEditMode()
 end
@@ -114,6 +118,7 @@ end
 
 --- Pawn 进入 TriggerZone 时由 C++ AUGCTriggerZone 调用
 function M:OnTriggerZoneEnter(programID)
+    if EditorCore:GetState() ~= "Play" then return end
     local id = tostring(programID)
     print("[UGCPlayerController] TriggerZone Enter: " .. id)
     ProgramRunner:RunProgram(id, "Event_OnEnter")
@@ -121,6 +126,7 @@ end
 
 --- Pawn 离开 TriggerZone 时由 C++ AUGCTriggerZone 调用
 function M:OnTriggerZoneExit(programID)
+    if EditorCore:GetState() ~= "Play" then return end
     local id = tostring(programID)
     print("[UGCPlayerController] TriggerZone Exit: " .. id)
     ProgramRunner:RunProgram(id, "Event_OnExit")
