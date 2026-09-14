@@ -42,6 +42,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UGC|Editor")
     void DestroyActor(AActor* Actor);
 
+    /** 与旧 void API 并存，供命令层获取删除是否真正成功。 */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Editor")
+    bool TryDestroyActor(AActor* Actor);
+
     /**
      * 从屏幕坐标发射射线，返回命中的第一个 Actor
      * 用于鼠标点击选中
@@ -80,6 +84,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UGC|Editor")
     void SetActorTransform(AActor* Actor, const FTransform& NewTransform);
 
+    /** 与旧 void API 并存，供命令层获取 Transform 是否真正应用。 */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Editor")
+    bool TrySetActorTransform(AActor* Actor, const FTransform& NewTransform);
+
     /**
      * 设置 Actor 下所有 PrimitiveComponent 的 Translucency Sort Priority。
      * 主要用于让 Gizmo 这类半透明编辑器控件拥有更高的渲染排序。
@@ -103,7 +111,7 @@ public:
 
     /**
      * 枚举目录下匹配通配符的文件，返回完整绝对路径数组
-     * 仅在 PIE/Development 模式下可用（打包后 .uasset 在 pak 内不可见）
+     * 仅在 Editor 构建可用；打包运行时返回空数组并使用 Catalog。
      * Directory 示例：FPaths::ProjectContentDir() + "_UGC/Placeables/"
      * WildCard  示例："*.uasset"
      */
@@ -139,6 +147,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UGC|Editor")
     FString ShowOpenFileDialog(const FString& Title, const FString& DefaultPath, const FString& FileType);
 
+    UFUNCTION(BlueprintPure, Category = "UGC|Editor")
+    bool SupportsNativeFileDialogs() const;
+
 private:
     APlayerController* GetPC() const;
+
+    UPROPERTY()
+    TSet<TObjectPtr<AActor>> SpawnedActors;
 };

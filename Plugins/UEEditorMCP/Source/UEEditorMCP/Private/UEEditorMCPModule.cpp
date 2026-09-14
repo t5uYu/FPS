@@ -30,6 +30,7 @@
 #include "MaterialGraph/MaterialGraphNode.h"
 #include "MaterialGraph/MaterialGraphNode_Root.h"
 #include "GraphEditor.h"
+#include "LuaAssetContextMenu.h"
 
 #define LOCTEXT_NAMESPACE "FUEEditorMCPModule"
 
@@ -1021,12 +1022,14 @@ void FUEEditorMCPModule::StartupModule()
 	// when the editor starts. It handles server startup internally.
 
 	RegisterAutoLayoutCommands();
+	UEEditorMCPLuaAssetMenu::Install();
 }
 
 void FUEEditorMCPModule::ShutdownModule()
 {
 	UE_LOG(LogMCP, Log, TEXT("UEEditorMCP: Module shutting down"));
 
+	UEEditorMCPLuaAssetMenu::Remove();
 	UnregisterAutoLayoutCommands();
 
 	FMCPLogCapture::Get().Stop();

@@ -1,6 +1,14 @@
 --[[
     Util/json.lua
-    轻量 JSON 编码/解码，供 UGC 模块共用
+
+    UGC 文档持久化使用的唯一 JSON 编解码实现。
+    新格式 project.ugc.json 与旧格式 scene.json / programs.json 都经此模块读写；
+    不要在其它目录下再新增 JSON 实现（历史上曾有 3 份副本，已收敛）。
+
+    约定：
+    - 对象键按字典序排序输出，保证存档可 diff、可复现
+    - 非有限数（NaN / Inf）编码为 null，保证输出是合法 JSON
+    - decode 失败返回 nil 并打印错误，不抛异常
 
     用法：
         local json = require("Util.json")
@@ -24,7 +32,7 @@ local parseValue  -- 前向声明
 local function parseString(s, i)
     i = i + 1  -- 跳过 "
     local buf = {}
-    local escMap = { ['"']='"', ['\\']='\\', ['/']='\/', ['n']='\n', ['r']='\r', ['t']='\t', ['b']='\b', ['f']='\f' }
+    local escMap = { ['"']='"', ['\\']='\\', ['/']='/', ['n']='\n', ['r']='\r', ['t']='\t', ['b']='\b', ['f']='\f' }
     while i <= #s do
         local c = s:sub(i, i)
         if c == '"' then
@@ -111,6 +119,8 @@ local function encodeVal(v, indent, level)
     if t == "nil"     then return "null"
     elseif t == "boolean" then return v and "true" or "false"
     elseif t == "number"  then
+        -- 非有限数没有合法 JSON 表示，写 null 而不是产出 nan/inf 破坏存档
+        if v ~= v or v == math.huge or v == -math.huge then return "null" end
         return (math.floor(v) == v) and string.format("%d", v) or string.format("%.6g", v)
     elseif t == "string"  then
         return '"' .. v:gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t') .. '"'

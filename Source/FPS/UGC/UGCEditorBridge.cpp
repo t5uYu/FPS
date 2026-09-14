@@ -8,9 +8,11 @@
 #include "HAL/FileManager.h"
 #include "DrawDebugHelpers.h"
 #include "InputCoreTypes.h"
+#if WITH_EDITOR
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
+#endif
 
 UUGCEditorBridge::UUGCEditorBridge()
 {
@@ -19,6 +21,14 @@ UUGCEditorBridge::UUGCEditorBridge()
 
 AActor* UUGCEditorBridge::SpawnPlaceable(const FString& BlueprintPath, FVector Location, FRotator Rotation)
 {
+    if (!GetOwner() || !GetOwner()->HasAuthority()) return nullptr;
+    if (!BlueprintPath.StartsWith(TEXT("/Game/_UGC/Placeables/"))
+        && !BlueprintPath.StartsWith(TEXT("/Game/_UGC/Editor/Actor/")))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Rejected asset path '%s'"), *BlueprintPath);
+        return nullptr;
+    }
+
     UWorld* World = GetWorld();
     if (!World) return nullptr;
 
@@ -37,15 +47,23 @@ AActor* UUGCEditorBridge::SpawnPlaceable(const FString& BlueprintPath, FVector L
     {
         UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] SpawnPlaceable: Spawn 失败 '%s'"), *BlueprintPath);
     }
+    else
+    {
+        SpawnedActors.Add(Actor);
+    }
     return Actor;
 }
 
 void UUGCEditorBridge::DestroyActor(AActor* Actor)
 {
-    if (Actor && IsValid(Actor))
-    {
-        Actor->Destroy();
-    }
+    TryDestroyActor(Actor);
+}
+
+bool UUGCEditorBridge::TryDestroyActor(AActor* Actor)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !Actor || !SpawnedActors.Contains(Actor)) return false;
+    SpawnedActors.Remove(Actor);
+    return !IsValid(Actor) || Actor->Destroy();
 }
 
 AActor* UUGCEditorBridge::LineTraceScreen(float ScreenX, float ScreenY)
@@ -98,8 +116,14 @@ FTransform UUGCEditorBridge::GetActorTransform(AActor* Actor) const
 
 void UUGCEditorBridge::SetActorTransform(AActor* Actor, const FTransform& NewTransform)
 {
-    if (!Actor || !IsValid(Actor)) return;
-    Actor->SetActorTransform(NewTransform);
+    TrySetActorTransform(Actor, NewTransform);
+}
+
+bool UUGCEditorBridge::TrySetActorTransform(AActor* Actor, const FTransform& NewTransform)
+{
+    if (!GetOwner() || !GetOwner()->HasAuthority() || !Actor || !IsValid(Actor)
+        || !SpawnedActors.Contains(Actor)) return false;
+    return Actor->SetActorTransform(NewTransform);
 }
 
 void UUGCEditorBridge::SetActorTranslucencySortPriority(AActor* Actor, int32 Priority)
@@ -205,7 +229,11 @@ APlayerController* UUGCEditorBridge::GetPC() const
 TArray<FString> UUGCEditorBridge::FindFilesInDirectory(const FString& Directory, const FString& WildCard)
 {
     TArray<FString> Result;
+#if WITH_EDITOR
     IFileManager::Get().FindFilesRecursive(Result, *Directory, *WildCard, /*Files=*/true, /*Dirs=*/false);
+#else
+    UE_LOG(LogTemp, Verbose, TEXT("[UGCEditorBridge] Runtime asset scanning is disabled; use the packaged prefab catalog"));
+#endif
     return Result;
 }
 
@@ -255,6 +283,7 @@ bool UUGCEditorBridge::IsEscapeDown()
     return PC->IsInputKeyDown(EKeys::Escape);
 }
 
+#if WITH_EDITOR
 static void* GetParentWindowHandle()
 {
     TSharedPtr<SWindow> TopWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
@@ -264,25 +293,45 @@ static void* GetParentWindowHandle()
     }
     return nullptr;
 }
+#endif
 
 FString UUGCEditorBridge::ShowSaveFileDialog(const FString& Title, const FString& DefaultPath, const FString& DefaultFile, const FString& FileType)
 {
+#if WITH_EDITOR
     IDesktopPlatform* DP = FDesktopPlatformModule::Get();
     if (!DP) return TEXT("");
 
     TArray<FString> OutFiles;
-    bool bOK = DP->SaveFileDialog(GetParentWindowHandle(), Title, DefaultPath, DefaultFile, FileType, EFileDialogFlags::None, OutFiles);
+    const bool bOK = DP->SaveFileDialog(GetParentWindowHandle(), Title, DefaultPath, DefaultFile, FileType, EFileDialogFlags::None, OutFiles);
     return (bOK && OutFiles.Num() > 0) ? OutFiles[0] : TEXT("");
+#else
+    UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Native save dialog is editor-only"));
+    return TEXT("");
+#endif
 }
 
 FString UUGCEditorBridge::ShowOpenFileDialog(const FString& Title, const FString& DefaultPath, const FString& FileType)
 {
+#if WITH_EDITOR
     IDesktopPlatform* DP = FDesktopPlatformModule::Get();
     if (!DP) return TEXT("");
 
     TArray<FString> OutFiles;
-    bool bOK = DP->OpenFileDialog(GetParentWindowHandle(), Title, DefaultPath, TEXT(""), FileType, EFileDialogFlags::None, OutFiles);
+    const bool bOK = DP->OpenFileDialog(GetParentWindowHandle(), Title, DefaultPath, TEXT(""), FileType, EFileDialogFlags::None, OutFiles);
     return (bOK && OutFiles.Num() > 0) ? OutFiles[0] : TEXT("");
+#else
+    UE_LOG(LogTemp, Warning, TEXT("[UGCEditorBridge] Native open dialog is editor-only"));
+    return TEXT("");
+#endif
+}
+
+bool UUGCEditorBridge::SupportsNativeFileDialogs() const
+{
+#if WITH_EDITOR
+    return true;
+#else
+    return false;
+#endif
 }
 
 void UUGCEditorBridge::ClearDebugAxes()

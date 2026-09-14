@@ -5,6 +5,8 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
+# Local tooling artifacts (e.g. Temp\LuaTools\lua54.exe built by Tools\UGCTests\run_tests.ps1)
+/Temp/
 .vs/
 .idea/
 *.sln/
@@ -16,9 +18,12 @@ DerivedDataCache/
 /Output/docx_builder
 *.docx
 /Plugins/UnLua/Source
-*.log
-unreal_mcp_advanced.log
-/Backend
-/Plugins/UnLua/Source
-*.log
-/Docs/article
+
+# Keep the project knowledge base maintained for Codex/developers.
+!PROJECT_INDEX.md
+!docs/
+!docs/knowledge/
+!docs/knowledge/*.md
+!docs/knowledge/generated/
+!docs/knowledge/generated/*.md
+!docs/knowledge/generated/*.json

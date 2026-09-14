@@ -14,6 +14,7 @@
 local UIManager       = require("Gameplay.Core.UIManager")
 local PrefabRegistry  = require("Gameplay.UGC.UGCPrefabRegistry")
 local SceneData       = require("Gameplay.UGC.UGCSceneData")
+local Log             = require("Gameplay.UGC.UGCLog")
 
 local EditorCore = {}
 EditorCore.__index = EditorCore
@@ -227,10 +228,11 @@ local function spawnGizmo(posX, posY, posZ)
     _gizmoOffsetX = getGizmoRootOffset(_gizmoX)
     _gizmoOffsetY = getGizmoRootOffset(_gizmoY)
     _gizmoOffsetZ = getGizmoRootOffset(_gizmoZ)
-
-    print(string.format("[Gizmo] spawn X=%s Y=%s Z=%s at root (%.0f,%.0f,%.0f), offsets=(%.1f,%.1f,%.1f)",
-        tostring(_gizmoX), tostring(_gizmoY), tostring(_gizmoZ), posX, posY, posZ,
-        _gizmoOffsetX, _gizmoOffsetY, _gizmoOffsetZ))
+    Log.Debug("gizmo_spawned", {
+        arrows = { tostring(_gizmoX), tostring(_gizmoY), tostring(_gizmoZ) },
+        root = { posX, posY, posZ },
+        offsets = { _gizmoOffsetX, _gizmoOffsetY, _gizmoOffsetZ },
+    })
 end
 
 --- 销毁全部 Gizmo 箭头并清除活动轴
@@ -306,7 +308,7 @@ function EditorCore:Init(playerController)
     _bridge = playerController:GetUGCEditorBridge()
 
     if not _bridge then
-        print("[UGCEditorCore] 警告: GetUGCEditorBridge() 返回 nil，编辑器功能不可用！请确认 BP_UGCPlayerController 继承自 AUGCPlayerController")
+        Log.Error("bridge_unavailable", "GetUGCEditorBridge() 返回 nil，编辑器功能不可用", { hint = "确认 BP_UGCPlayerController 继承自 AUGCPlayerController" })
         return
     end
 
@@ -336,15 +338,15 @@ end
 local function _ensureBridge()
     if _bridge then return true end
     if not _pc then
-        print("[UGCEditorCore] _bridge 为 nil 且 _pc 未初始化，请先调用 Init()")
+        Log.Error("bridge_unavailable", "_bridge 为 nil 且 _pc 未初始化", { hint = "先调用 EditorCore:Init()" })
         return false
     end
     _bridge = _pc:GetUGCEditorBridge()
     if not _bridge then
-        print("[UGCEditorCore] 懒初始化失败：GetUGCEditorBridge() 仍返回 nil")
+        Log.Error("bridge_unavailable", "懒初始化失败：GetUGCEditorBridge() 仍返回 nil")
         return false
     end
-    print("[UGCEditorCore] _bridge 懒初始化成功")
+    Log.Info("editor_bridge_lazy_init", { ok = true })
     SceneData:Init(_bridge)
     return true
 end
@@ -372,6 +374,9 @@ end
 
 function EditorCore:EnterEditMode()
     if _currentState == State.Edit then return end
+    local ProgramRunner = require("Gameplay.UGC.UGCProgramRunner")
+    ProgramRunner:CancelAllTasks()
+    if _pc and _pc.ExitPlaytestPawn then _pc:ExitPlaytestPawn() end
     _currentState  = State.Edit
     _selectedID    = nil
     _pendingPrefab = nil
@@ -386,11 +391,24 @@ function EditorCore:EnterEditMode()
     setAllTriggerZoneDebugVisible(true)
 
     if _onStateChanged then _onStateChanged(State.Edit) end
-    print("[UGCEditorCore] 进入编辑模式")
+    Log.Info("editor_state", { state = State.Edit })
 end
 
 function EditorCore:EnterPlayMode()
     if _currentState == State.Play then return end
+
+    local blueprintEditor = UIManager:GetWindow("WBP_UGCBlueprintEditor")
+    if blueprintEditor and blueprintEditor.OnClickClose then
+        blueprintEditor:OnClickClose()
+    elseif blueprintEditor then
+        if blueprintEditor.SaveCurrentGraphToSceneData then blueprintEditor:SaveCurrentGraphToSceneData() end
+        UIManager:CloseWindow("WBP_UGCBlueprintEditor")
+    end
+
+    if _pc and _pc.EnterPlaytestPawn and not _pc:EnterPlaytestPawn() then
+        Log.Error("playtest_unavailable", "PlaytestPawnClass 未配置或当前实例无 Authority")
+        return false
+    end
 
     -- 取消选中
     self:ClearSelection()
@@ -406,8 +424,13 @@ function EditorCore:EnterPlayMode()
     -- 隐藏所有 TriggerZone 的编辑模式可视化方块
     setAllTriggerZoneDebugVisible(false)
 
+    local ProgramRunner = require("Gameplay.UGC.UGCProgramRunner")
+    ProgramRunner:CancelAllTasks()
+    ProgramRunner:TriggerGameStart()
+
     if _onStateChanged then _onStateChanged(State.Play) end
-    print("[UGCEditorCore] 进入试玩模式")
+    Log.Info("editor_state", { state = State.Play })
+    return true
 end
 
 function EditorCore:ToggleEditMode()
@@ -437,7 +460,7 @@ end
 function EditorCore:SelectPrefab(prefabName)
     if not _ensureBridge() then return end
     if not PrefabRegistry.IsValid(prefabName) then
-        print("[UGCEditorCore] 未知预制体: " .. tostring(prefabName))
+        Log.Error("unknown_prefab", nil, { prefab = prefabName })
         return
     end
 
@@ -467,7 +490,7 @@ function EditorCore:SelectPrefab(prefabName)
         _bridge:SetActorHighlight(_ghostActor, true)
         pcall(function() _ghostActor:SetDebugVisible(true) end)
     end
-    print("[UGCEditorCore] 放置模式（Ghost）: " .. prefabName)
+    Log.Info("placement_mode", { prefab = prefabName })
 end
 
 function EditorCore:_destroyGhost()
@@ -627,7 +650,7 @@ function EditorCore:SelectByID(sceneID)
     end
 
     if _onSelectionChanged then _onSelectionChanged(sceneID) end
-    print("[UGCEditorCore] 选中 SceneID=" .. tostring(sceneID))
+    Log.Debug("editor_selection", { entity = sceneID })
 end
 
 function EditorCore:ClearSelection()
@@ -719,17 +742,13 @@ function EditorCore:Redo()
 end
 
 --============================================================
--- 保存/加载（JSON，对接 UGCAssetClient）
+-- 场景清空
+--
+-- 存档/读档不在 EditorCore：运行时只有 UGCPersistence（单一 *.ugc.json 包，
+-- 旧 scene.json + programs.json 走它的只读迁移路径）。原先这里的
+-- SaveSceneJSON / LoadSceneJSON 是无人调用的透传包装，已于 T18 删除，
+-- 不要再加回来——需要导出旧格式请直接用 SceneData 上的 legacy 入口。
 --============================================================
-
-function EditorCore:SaveSceneJSON()
-    return SceneData:SerializeToJSON()
-end
-
-function EditorCore:LoadSceneJSON(json)
-    self:ClearSelection()
-    SceneData:DeserializeFromJSON(json)
-end
 
 function EditorCore:ClearScene()
     self:ClearSelection()

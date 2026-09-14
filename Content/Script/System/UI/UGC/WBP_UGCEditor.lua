@@ -23,6 +23,7 @@
 ]]
 
 local EditorCore      = require("Gameplay.UGC.UGCEditorCore")
+local Persistence     = require("Gameplay.UGC.UGCPersistence")
 local _ok, PrefabRegistry = pcall(require, "Gameplay.UGC.UGCPrefabRegistry")
 if not _ok then
     print("[WBP_UGCEditor] 警告: 顶层 require UGCPrefabRegistry 失败: " .. tostring(PrefabRegistry))
@@ -399,8 +400,11 @@ end
 function M:OnClickPlay()
     local state = EditorCore:GetState()
     if state == "Edit" then
-        EditorCore:EnterPlayMode()
-        self:SetStatus("试玩模式 — 按 F2 返回编辑")
+        if EditorCore:EnterPlayMode() then
+            self:SetStatus("试玩模式 — 按 F2 返回编辑")
+        else
+            self:SetStatus("无法进入试玩：请检查 Playtest Pawn 配置或 Authority")
+        end
     else
         EditorCore:EnterEditMode()
     end
@@ -408,106 +412,62 @@ end
 
 function M:OnClickSave()
     local bridge = EditorCore:GetBridge()
-    local defDir = UE.UKismetSystemLibrary.GetProjectDirectory() .. "Saved/UGC/"
-    os.execute('mkdir "' .. defDir:gsub("/", "\\") .. '" 2>NUL')
+    if not bridge then self:SetStatus("保存失败：EditorBridge 不可用"); return end
 
-    -- 先把蓝图编辑器当前图存回 SceneData
     local UIManager = require("Gameplay.Core.UIManager")
     local bpInst = UIManager:GetWindow("WBP_UGCBlueprintEditor")
-    if bpInst and bpInst.SaveCurrentGraphToSceneData then
-        bpInst:SaveCurrentGraphToSceneData()
+    if bpInst and bpInst.SaveCurrentGraphToSceneData then bpInst:SaveCurrentGraphToSceneData() end
+
+    local defDir = UE.UKismetSystemLibrary.GetProjectDirectory() .. "Saved/UGC/"
+    local picked
+    if bridge:SupportsNativeFileDialogs() then
+        picked = bridge:ShowSaveFileDialog(
+            "保存 UGC 项目", defDir, "my_scene.ugc.json", "UGC 项目|*.ugc.json|JSON 文件|*.json")
+        if not picked or picked == "" then self:SetStatus("保存已取消"); return end
+    else
+        picked = defDir .. "project.ugc.json"
     end
-
-    -- 对话框：用户输入场景名，返回路径作为文件夹名使用（无需扩展名）
-    local picked = bridge:ShowSaveFileDialog("保存场景（输入场景名）", defDir, "my_scene", "所有文件|*.*")
-    if not picked or picked == "" then
-        self:SetStatus("保存已取消")
-        return
-    end
-
-    -- 统一正斜杠，去掉用户可能多打的扩展名，末尾补 /
-    picked = picked:gsub("\\", "/")
-    local folderPath = picked:gsub("%.[^/]+$", "") .. "/"
-
-    -- 创建场景子文件夹
-    local folderWin = folderPath:gsub("/", "\\"):gsub("\\$", "")
-    os.execute('mkdir "' .. folderWin .. '" 2>NUL')
 
     local SceneData = require("Gameplay.UGC.UGCSceneData")
-
-    local function writeFile(p, content)
-        local f = io.open(p, "w")
-        if f then f:write(content); f:close(); return true end
-        return false
-    end
-
-    local ok1 = writeFile(folderPath .. "scene.json",    SceneData:SerializeToJSON())
-    local ok2 = writeFile(folderPath .. "programs.json", SceneData:SerializeProgramsJSON())
-    local ok3 = writeFile(folderPath .. "editor.json",   SceneData:SerializeEditorJSON())
-
-    if ok1 and ok2 and ok3 then
-        SceneData:ClearDirty()
-        self:SetStatus("场景已保存 → " .. folderPath)
-        Log("保存成功: " .. folderPath)
+    local ok, result = Persistence:SaveProject(picked, SceneData, {
+        activeProgramId = bpInst and bpInst.GetActiveID and bpInst:GetActiveID() or "level_main",
+    })
+    if ok then
+        self:SetStatus("UGC 项目已原子保存 → " .. tostring(result))
+        Log("保存成功: " .. tostring(result))
     else
-        self:SetStatus("保存部分失败，请检查日志")
-        Warn("保存失败 scene=" .. tostring(ok1) .. " prog=" .. tostring(ok2) .. " editor=" .. tostring(ok3))
+        self:SetStatus("保存失败: " .. tostring(result))
+        Warn("保存失败: " .. tostring(result))
     end
 end
 
 function M:OnClickLoad()
     local bridge = EditorCore:GetBridge()
+    if not bridge then self:SetStatus("加载失败：EditorBridge 不可用"); return end
+
     local defDir = UE.UKismetSystemLibrary.GetProjectDirectory() .. "Saved/UGC/"
-
-    -- 用户导航到场景文件夹，选中里面的 scene.json
-    local path = bridge:ShowOpenFileDialog("加载场景（选择文件夹内的 scene.json）", defDir, "JSON 文件|*.json")
-    if not path or path == "" then
-        self:SetStatus("加载已取消")
-        return
-    end
-
-    -- 立刻显示加载遮罩，阻止加载期间的误操作
-    self:ShowLoading("场景加载中…")
-
-    path = path:gsub("\\", "/")
-
-    -- 从选中文件推断出所在文件夹
-    local folderPath = path:match("^(.*/)") or defDir
-
-    local function readFile(p)
-        local f = io.open(p, "r")
-        if not f then return nil end
-        local s = f:read("*a"); f:close(); return s
-    end
-
-    -- 加载 scene.json（优先从同目录读，兼容用户直接选中 scene.json 或选了别的 json）
-    local sceneJSON = readFile(folderPath .. "scene.json")
-    if not sceneJSON then
-        self:HideLoading()
-        self:SetStatus("加载失败（文件夹内找不到 scene.json）")
-        Warn("找不到: " .. folderPath .. "scene.json")
-        return
-    end
-    EditorCore:LoadSceneJSON(sceneJSON)
-
-    -- 加载 programs.json（可选）
-    local programsJSON = readFile(folderPath .. "programs.json")
-    if programsJSON then
-        local SceneData = require("Gameplay.UGC.UGCSceneData")
-        SceneData:DeserializeProgramsJSON(programsJSON)
-        Log("programs.json 加载成功")
+    local path
+    if bridge:SupportsNativeFileDialogs() then
+        path = bridge:ShowOpenFileDialog(
+            "加载 UGC 项目", defDir, "UGC 项目|*.ugc.json|旧版场景|scene.json|JSON 文件|*.json")
+        if not path or path == "" then self:SetStatus("加载已取消"); return end
     else
-        Log("programs.json 不存在，跳过")
+        path = defDir .. "project.ugc.json"
     end
 
-    -- editor.json（目前仅存根，跳过处理）
+    self:ShowLoading("场景加载中…")
+    self:ClearTransformInputs()
 
-    local folderName = folderPath:match("([^/]+)/$") or folderPath
-    local doneMsg    = "场景已加载 ← " .. folderName
-    Log("加载成功: " .. folderPath)
+    local SceneData = require("Gameplay.UGC.UGCSceneData")
+    local ok, result = Persistence:LoadProject(path, SceneData)
+    if not ok then
+        self:HideLoading()
+        self:SetStatus("加载失败: " .. tostring(result))
+        Warn("加载失败: " .. tostring(result))
+        return
+    end
 
-    -- 延迟 3 帧后隐藏遮罩：给引擎足够时间完成 Actor BeginPlay 等延迟初始化，
-    -- 避免玩家在同一帧或次帧立刻操作引发 TryBind 重入崩溃
+    local doneMsg = "UGC 项目已加载 ← " .. tostring(result)
     local pc = self:GetOwningPlayer()
     if pc and pc.ScheduleCallback then
         pc:ScheduleCallback(function()
@@ -515,7 +475,6 @@ function M:OnClickLoad()
             self:SetStatus(doneMsg)
         end, 3)
     else
-        -- 降级：直接隐藏（不延迟）
         self:HideLoading()
         self:SetStatus(doneMsg)
     end

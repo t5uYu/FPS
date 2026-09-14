@@ -8,7 +8,7 @@
     - 最多保留 MAX_DISPLAY 条显示消息，避免文件过大
 ]]
 
-local json = require("Gameplay.UGC.json")
+local json = require("Util.json")
 
 local M = UnLua.Class()
 
@@ -174,21 +174,20 @@ end
 
 function M:SaveDisplayHistory()
     ensureDir()
-    local f = io.open(getDisplayPath(), "w")
-    if f then
-        f:write(json.encode(self._displayMsgs or {}))
-        f:close()
+    local pc = self:GetOwningPlayer()
+    local storage = pc and pc:GetUGCStorageBridge() or nil
+    if storage then
+        storage:WriteTextFileAtomic(getDisplayPath(), json.encode(self._displayMsgs or {}))
     end
 end
 
 --- 读取并重放历史气泡，返回 bool（是否有历史）
 function M:LoadDisplayHistory()
-    local f = io.open(getDisplayPath(), "r")
-    if not f then return false end
-    local content = f:read("*a")
-    f:close()
-
-    local msgs = json.decode(content)
+    local pc = self:GetOwningPlayer()
+    local storage = pc and pc:GetUGCStorageBridge() or nil
+    local path = getDisplayPath()
+    if not storage or not storage:FileExists(path) then return false end
+    local msgs = json.decode(tostring(storage:ReadTextFile(path)))
     if type(msgs) ~= "table" or #msgs == 0 then return false end
 
     self._displayMsgs = msgs

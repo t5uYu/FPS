@@ -1,326 +1,264 @@
 --[[
     UGCProgramRunner.lua
-    蓝图执行引擎（Lua 单例）
 
-    职责：
-    - RunProgram(programID, eventType)  从 SceneData 读取图，找对应事件节点入口，沿 exec 引脚链执行
-    - Tick(deltaTime)                   累计 deltaTime，驱动 Event_OnInterval 定时节点
-    - RegisterIntervals(programID)      扫描程序中的 Event_OnInterval 并注册定时器
-    - TriggerGameStart()                向所有程序广播 Event_OnGameStart
-
-    节点分发规则：
-      Set_Attribute  → UGCFunctionRegistry:Call("set_attribute")
-      Set_GameRule   → UGCFunctionRegistry:Call("set_rule")
-      Spawn_Weapon   → UGCFunctionRegistry:Call("spawn_weapon")
-      Print_Message  → UKismetSystemLibrary.PrintString + print
-      Branch         → 评估 condition_node → exec_out_true / exec_out_false
-      Delay          → ScheduleCallback(frames) 异步，不阻塞同步链
-
-    调用方式：
-        local Runner = require("Gameplay.UGC.UGCProgramRunner")
-        Runner:Init(playerController)
-        Runner:RunProgram("actor_prog_3", "Event_OnEnter")
-        Runner:Tick(deltaTime)   -- 在 PC ReceiveTick 里调
+    Executes compiled UGC graph programs. Graph validation/normalization lives
+    in UGCGraphCompiler; this module owns runtime tasks and real-time scheduling.
 ]]
 
-local UGCRegistry = require("Gameplay.UGC.UGCFunctionRegistry")
-local SceneData   = require("Gameplay.UGC.UGCSceneData")
+local Registry = require("Gameplay.UGC.UGCFunctionRegistry")
+local SceneData = require("Gameplay.UGC.UGCSceneData")
+local Compiler = require("Gameplay.UGC.UGCGraphCompiler")
+local UGCLog = require("Gameplay.UGC.UGCLog")
 
 local Runner = {}
 Runner.__index = Runner
 
-local _pc          = nil
+local _pc = nil
 local _initialized = false
-
--- Event_OnInterval 定时表：{ {programID, nodeID, interval, accumulated} }
+local _compiled = {}
 local _intervals = {}
+local _delayedTasks = {}
+local _nextTaskId = 1
 
-local MAX_DEPTH = 32   -- 防止无限循环（循环连线场景）
-local LOG_TAG   = "[UGCProgramRunner]"
+local MAX_STEPS_PER_RUN = 128
+local MAX_TASKS_PER_TICK = 64
+-- 运行期日志统一走 UGCLog（program 字段是排障主键，见 logProgram）
+local _activeProgram = nil
 
-local function Log(msg)  print(LOG_TAG .. " " .. tostring(msg)) end
-local function Warn(msg) print(LOG_TAG .. "[Warn] " .. tostring(msg)) end
-
---============================================================
--- 初始化
---============================================================
+local function logProgram(fields)
+    local payload = fields or {}
+    payload.program = payload.program or _activeProgram
+    return payload
+end
+local function commandContext(programID, nodeID)
+    return { source="script", approved=true, programId=programID, nodeId=nodeID }
+end
 
 function Runner:Init(playerController)
-    _pc          = playerController
+    _pc = playerController
     _initialized = true
-    _intervals   = {}
-    Log("初始化完成")
-end
-
---============================================================
--- 公共入口
---============================================================
-
---- 执行程序中指定事件类型的所有匹配节点
---- @param programID  string  "level_main" 或 "actor_prog_N"
---- @param eventType  string  节点类型名，如 "Event_OnEnter" / "Event_OnGameStart"
---- @param context    table   可选上下文（触发者信息等，供未来扩展）
-function Runner:RunProgram(programID, eventType, context)
-    if not _initialized then
-        Warn("RunProgram: Runner 未初始化，跳过")
-        return
-    end
-
-    local graphData = SceneData:GetScript(programID)
-    if not graphData then return end
-
-    -- 建节点 map：id → nodeData
-    local nodeMap = {}
-    for _, n in ipairs(graphData.nodes or {}) do
-        if n.id then nodeMap[n.id] = n end
-    end
-
-    -- 建 exec 连线索引：[fromID][fromPin] = {to_id, to_pin}
-    local connMap = {}
-    for _, c in ipairs(graphData.connections or {}) do
-        if not connMap[c.from_id] then connMap[c.from_id] = {} end
-        connMap[c.from_id][c.from_pin] = { to_id = c.to_id, to_pin = c.to_pin }
-    end
-
-    -- 找并触发所有匹配事件节点
-    local found = 0
-    for _, n in ipairs(graphData.nodes or {}) do
-        if n.type == eventType then
-            found = found + 1
-            Log(string.format("触发 %s → 节点 %s [%s]", eventType, n.id, programID))
-            self:_executeFrom(n.id, "exec_out", nodeMap, connMap, context or {}, 0)
-        end
-    end
-end
-
---- 向关卡蓝图广播 Event_OnGameStart
-function Runner:TriggerGameStart()
-    self:RunProgram("level_main", "Event_OnGameStart")
-    Log("Event_OnGameStart 广播完成")
-end
-
---- 扫描程序中的 Event_OnInterval 节点，注册定时器（不重复注册）
---- 应在进入游戏模式时对所有已加载程序调用
-function Runner:RegisterIntervals(programID)
-    local graphData = SceneData:GetScript(programID)
-    if not graphData then return end
-
-    for _, n in ipairs(graphData.nodes or {}) do
-        if n.type == "Event_OnInterval" then
-            local interval = tonumber((n.params or {}).interval) or 5.0
-            -- 去重检查
-            local exists = false
-            for _, v in ipairs(_intervals) do
-                if v.programID == programID and v.nodeID == n.id then
-                    exists = true; break
-                end
-            end
-            if not exists then
-                table.insert(_intervals, {
-                    programID   = programID,
-                    nodeID      = n.id,
-                    interval    = interval,
-                    accumulated = 0,
-                })
-                Log(string.format("注册定时器: %s 节点 %s 间隔 %.2fs",
-                    programID, n.id, interval))
-            end
-        end
-    end
-end
-
---- 清除所有定时器（退出游戏 / 重置时调用）
-function Runner:ClearIntervals()
+    _compiled = {}
     _intervals = {}
+    _delayedTasks = {}
+    _nextTaskId = 1
+    SceneData:Subscribe("changed", function(event)
+        if event and event.kind == "program_changed" then
+            Runner:InvalidateProgram(event.programId)
+        elseif event and (event.kind == "document_loaded" or event.kind == "document_cleared") then
+            _compiled = {}
+            _intervals = {}
+            _delayedTasks = {}
+        end
+    end)
+    UGCLog.Info("runner_initialized", { maxStepsPerRun = MAX_STEPS_PER_RUN, maxTasksPerTick = MAX_TASKS_PER_TICK })
 end
 
---- PC ReceiveTick 驱动：累计 deltaTime，触发到期的定时事件
-function Runner:Tick(deltaTime)
-    if not _initialized or #_intervals == 0 then return end
-    for _, v in ipairs(_intervals) do
-        v.accumulated = v.accumulated + deltaTime
-        if v.accumulated >= v.interval then
-            v.accumulated = v.accumulated - v.interval
-            self:RunProgram(v.programID, "Event_OnInterval")
+function Runner:InvalidateProgram(programID)
+    _compiled[programID] = nil
+    for i = #_intervals, 1, -1 do
+        if _intervals[i].programID == programID then table.remove(_intervals, i) end
+    end
+    for i = #_delayedTasks, 1, -1 do
+        if _delayedTasks[i].metadata.programID == programID then
+            table.remove(_delayedTasks, i)
         end
     end
 end
 
---============================================================
--- 内部执行：exec 链遍历
---============================================================
-
---- 从 fromID.fromPin 出发，沿连线找到下一节点执行
-function Runner:_executeFrom(fromID, fromPin, nodeMap, connMap, ctx, depth)
-    if depth > MAX_DEPTH then
-        Warn("执行深度超过上限 " .. MAX_DEPTH .. "，中止（请检查是否存在循环连线）")
-        return
+function Runner:CompileProgram(programID)
+    local graphData = SceneData:GetScript(programID)
+    if not graphData then return false, "程序不存在: " .. tostring(programID) end
+    local report = Compiler:Compile(graphData, { programID = programID })
+    if not report.ok then
+        return false, Compiler:FormatReport(report), report
     end
-
-    local outMap = connMap[fromID]
-    if not outMap then return end
-
-    local conn = outMap[fromPin]
-    if not conn then return end
-
-    self:_executeNode(conn.to_id, nodeMap, connMap, ctx, depth + 1)
+    _compiled[programID] = {
+        revision = SceneData:GetRevision(),
+        program = report.program,
+        report = report,
+    }
+    self:RegisterIntervals(programID, report.program)
+    return true, Compiler:FormatReport(report), report
 end
 
---- 执行单个节点，根据类型分发
-function Runner:_executeNode(nodeID, nodeMap, connMap, ctx, depth)
-    local node = nodeMap[nodeID]
-    if not node then
-        Warn("节点不存在: " .. tostring(nodeID))
-        return
+function Runner:GetCompiledProgram(programID)
+    local cached = _compiled[programID]
+    if cached then return cached.program end
+    local ok = self:CompileProgram(programID)
+    return ok and _compiled[programID].program or nil
+end
+
+function Runner:ValidateProgram(programID)
+    local graphData = SceneData:GetScript(programID)
+    if not graphData then return { ok=false, errors={{message="程序不存在"}}, warnings={} } end
+    return Compiler:Compile(graphData, { programID = programID })
+end
+
+function Runner:RunProgram(programID, eventType, context)
+    if not _initialized then UGCLog.Error("not_initialized", "ProgramRunner 未初始化"); return false end
+    local program = self:GetCompiledProgram(programID)
+    if not program then UGCLog.Error("compilation_failed", "图程序编译失败", { program = programID }); return false end
+    local entries = program.events[eventType] or {}
+    for _, eventNodeId in ipairs(entries) do
+        self:_executeFrom(programID, program, eventNodeId, "exec_out", context or {}, 0)
     end
+    return #entries > 0
+end
 
-    local t = node.type
-    local p = node.params or {}
-    Log(string.format("  执行 [%s] (%s)", nodeID, t))
+function Runner:TriggerGameStart()
+    self:CompileAllPrograms()
+    self:RunProgram("level_main", "Event_OnGameStart")
+end
 
-    -- ── 动作节点 ──────────────────────────────────────────────
+function Runner:CompileAllPrograms()
+    _intervals = {}
+    for programID in pairs(SceneData:GetAllScripts()) do self:CompileProgram(programID) end
+end
 
-    if t == "Set_Attribute" then
-        local ok, msg = UGCRegistry:Call("set_attribute", {
-            attribute = tostring(p.name  or ""),
-            value     = tonumber(p.value) or 0,
-        })
-        if not ok then Warn("Set_Attribute 失败: " .. tostring(msg)) end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+function Runner:RegisterIntervals(programID, program)
+    for i = #_intervals, 1, -1 do
+        if _intervals[i].programID == programID then table.remove(_intervals, i) end
+    end
+    program = program or self:GetCompiledProgram(programID)
+    if not program then return end
+    for _, interval in ipairs(program.intervals or {}) do
+        _intervals[#_intervals + 1] = {
+            programID=programID,
+            nodeID=interval.nodeId,
+            interval=interval.interval,
+            accumulated=0,
+        }
+    end
+end
 
-    elseif t == "Set_GameRule" then
-        local ok, msg = UGCRegistry:Call("set_rule", {
-            rule  = tostring(p.rule  or ""),
-            value = tonumber(p.value) or 0,
-        })
-        if not ok then Warn("Set_GameRule 失败: " .. tostring(msg)) end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+function Runner:ClearIntervals() _intervals = {} end
+function Runner:CancelAllTasks() _delayedTasks = {}; _intervals = {} end
 
-    elseif t == "Spawn_Weapon" then
-        local ok, msg = UGCRegistry:Call("spawn_weapon", {
-            weapon_id = tostring(p.weapon_id or ""),
-            x         = tonumber(p.x) or 0,
-            y         = tonumber(p.y) or 0,
-            z         = tonumber(p.z) or 100,
-        })
-        if not ok then Warn("Spawn_Weapon 失败: " .. tostring(msg)) end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+function Runner:_schedule(seconds, callback, metadata)
+    local id = _nextTaskId
+    _nextTaskId = _nextTaskId + 1
+    _delayedTasks[#_delayedTasks + 1] = {
+        id=id, remaining=math.max(0, tonumber(seconds) or 0),
+        callback=callback, metadata=metadata or {}, cancelled=false,
+    }
+    return id
+end
 
-    elseif t == "PCG_Generate" then
-        local ok, msg = UGCRegistry:Call("pcg_generate", {
-            x          = tonumber(p.x) or 0,
-            y          = tonumber(p.y) or 0,
-            z          = tonumber(p.z) or 0,
-            radius     = tonumber(p.radius) or 1000,
-            seed       = tonumber(p.seed) or 0,
-            graph_path = tostring(p.graph_path or ""),
-        })
-        if not ok then Warn("PCG_Generate 失败: " .. tostring(msg)) end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+function Runner:CancelTask(taskId)
+    for _, task in ipairs(_delayedTasks) do
+        if task.id == taskId then task.cancelled = true; return true end
+    end
+    return false
+end
 
-    elseif t == "PCG_Clear" then
-        local ok, msg = UGCRegistry:Call("pcg_clear", {})
-        if not ok then Warn("PCG_Clear 失败: " .. tostring(msg)) end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
-
-    elseif t == "Print_Message" then
-        local msg = tostring(p.msg or "")
-        Log("PrintMsg: " .. msg)
-        if _pc then
-            local w = _pc:GetWorld()
-            if w then
-                pcall(UE.UKismetSystemLibrary.PrintString, w, msg,
-                    true, true, UE.FLinearColor(0.1, 0.9, 1.0, 1.0), 5.0)
+function Runner:Tick(deltaTime)
+    if not _initialized then return end
+    local executed = 0
+    for _, interval in ipairs(_intervals) do
+        interval.accumulated = interval.accumulated + deltaTime
+        while interval.accumulated >= interval.interval and executed < MAX_TASKS_PER_TICK do
+            interval.accumulated = interval.accumulated - interval.interval
+            local program = self:GetCompiledProgram(interval.programID)
+            if program then
+                self:_executeFrom(interval.programID, program, interval.nodeID, "exec_out", {}, 0)
+                executed = executed + 1
+            else
+                break
             end
         end
-        self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+    end
 
-    -- ── 条件节点 ──────────────────────────────────────────────
-
-    elseif t == "Branch" then
-        local condID = tostring(p.condition_node or "")
-        local result = self:_evalCondition(condID, nodeMap, ctx)
-        local nextPin = result and "exec_out_true" or "exec_out_false"
-        Log(string.format("  Branch [%s] → %s", condID, nextPin))
-        self:_executeFrom(nodeID, nextPin, nodeMap, connMap, ctx, depth)
-
-    -- ── 延迟节点 ──────────────────────────────────────────────
-
-    elseif t == "Delay" then
-        local seconds = tonumber(p.seconds) or 1.0
-        local frames  = math.max(1, math.floor(seconds * 60))  -- 60fps 近似
-        Log(string.format("  Delay %.2fs ≈ %d 帧", seconds, frames))
-
-        if _pc and _pc.ScheduleCallback then
-            -- 捕获上下文，避免闭包持有大型表引用
-            local s_ = self
-            local a, b, c, d = nodeID, nodeMap, connMap, ctx
-            _pc:ScheduleCallback(function()
-                s_:_executeFrom(a, "exec_out", b, c, d, depth)
-            end, frames)
-        else
-            -- 降级同步（忽略延迟时长）
-            Warn("ScheduleCallback 不可用，Delay 降级为同步执行")
-            self:_executeFrom(nodeID, "exec_out", nodeMap, connMap, ctx, depth)
+    for i = #_delayedTasks, 1, -1 do
+        local task = _delayedTasks[i]
+        task.remaining = task.remaining - deltaTime
+        if task.cancelled then
+            table.remove(_delayedTasks, i)
+        elseif task.remaining <= 0 and executed < MAX_TASKS_PER_TICK then
+            table.remove(_delayedTasks, i)
+            executed = executed + 1
+            local ok, err = pcall(task.callback)
+            if not ok then UGCLog.Error("exception", err, logProgram({ task = task.nodeID, program = task.programID })) end
         end
-        -- Delay 是异步节点：此处 return，不继续同步链
-
-    else
-        Warn("未知节点类型: " .. tostring(t) .. " (节点 " .. nodeID .. ")")
     end
 end
 
---============================================================
--- 条件评估
---============================================================
+function Runner:_executeFrom(programID, program, fromID, fromPin, context, steps)
+    _activeProgram = programID
+    if steps >= MAX_STEPS_PER_RUN then
+        UGCLog.Error("budget_exhausted", "单帧执行步数超预算", logProgram({ steps = MAX_STEPS_PER_RUN })); return
+    end
+    local instruction = program.instructions[fromID]
+    local nextID = instruction and instruction.next[fromPin]
+    if nextID then self:_executeInstruction(programID, program, nextID, context, steps + 1) end
+end
 
---- 评估条件节点，返回 bool
-function Runner:_evalCondition(condNodeID, nodeMap, ctx)
-    if not condNodeID or condNodeID == "" then
-        Warn("Branch 未指定 condition_node，默认 false")
-        return false
+function Runner:_executeInstruction(programID, program, nodeID, context, steps)
+    _activeProgram = programID
+    local instruction = program.instructions[nodeID]
+    if not instruction then UGCLog.Error("unknown_instruction", "指令节点不存在", logProgram({ node = nodeID })); return end
+    local p = instruction.params or {}
+    local opcode = instruction.opcode
+    local ctx = commandContext(programID, nodeID)
+    local function callAndContinue(name, params)
+        local ok, result = Registry:Call(name, params, ctx)
+        if not ok then
+            UGCLog.Error("node_failed", result, logProgram({ node = nodeID, func = name }))
+            return false
+        end
+        self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
+        return true
     end
 
-    local node = nodeMap[condNodeID]
-    if not node then
-        Warn("条件节点不存在: " .. condNodeID)
+    if opcode == "SET_ATTRIBUTE" then
+        callAndContinue("set_attribute", {attribute=tostring(p.name or ""), value=tonumber(p.value) or 0})
+    elseif opcode == "SET_RULE" then
+        callAndContinue("set_rule", {rule=tostring(p.rule or ""), value=tonumber(p.value) or 0})
+    elseif opcode == "SPAWN_WEAPON" then
+        callAndContinue("spawn_weapon", {weapon_id=tostring(p.weapon_id or ""), x=tonumber(p.x) or 0, y=tonumber(p.y) or 0, z=tonumber(p.z) or 100})
+    elseif opcode == "PCG_GENERATE" then
+        callAndContinue("pcg_generate", {x=tonumber(p.x) or 0, y=tonumber(p.y) or 0, z=tonumber(p.z) or 0, radius=tonumber(p.radius) or 1000, seed=tonumber(p.seed) or 0})
+    elseif opcode == "PCG_CLEAR" then
+        callAndContinue("pcg_clear", {})
+    elseif opcode == "PRINT" then
+        local message = tostring(p.msg or "")
+        UGCLog.Info("program_print", logProgram({ node = nodeID, message = message }))
+        if _pc then pcall(UE.UKismetSystemLibrary.PrintString, _pc, message, true, true, UE.FLinearColor(0.1, 0.9, 1.0, 1.0), 5.0) end
+        self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
+    elseif opcode == "BRANCH" then
+        local result = self:_evalCondition(program, tostring(p.condition_node or ""), ctx)
+        self:_executeFrom(programID, program, nodeID, result and "exec_out_true" or "exec_out_false", context, steps)
+    elseif opcode == "DELAY" then
+        local seconds = math.max(0, tonumber(p.seconds) or 0)
+        self:_schedule(seconds, function()
+            self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
+        end, {programID=programID, nodeID=nodeID})
+    else
+        UGCLog.Error("unsupported_opcode", "不支持的 opcode", logProgram({ opcode = tostring(opcode) }))
+    end
+end
+
+function Runner:_evalCondition(program, nodeID, context)
+    local instruction = program.instructions[nodeID]
+    if not instruction then return false end
+    local p = instruction.params or {}
+    local lhs, ok
+    if instruction.opcode == "COMPARE_ATTRIBUTE" then
+        ok, lhs = Registry:Call("get_attribute", {attribute=tostring(p.attr or "")}, context)
+    elseif instruction.opcode == "COMPARE_RULE" then
+        ok, lhs = Registry:Call("get_rule", {rule=tostring(p.rule or "")}, context)
+    else
         return false
     end
-
-    local p   = node.params or {}
-    local t   = node.type
-    local lhs = 0
+    if not ok then return false end
     local rhs = tonumber(p.value) or 0
-
-    if t == "Compare_Attribute" then
-        local ok, val = UGCRegistry:Call("get_attribute",
-            { attribute = tostring(p.attr or "") })
-        if not ok then return false end
-        lhs = tonumber(val) or 0
-
-    elseif t == "Compare_GameRule" then
-        local ok, val = UGCRegistry:Call("get_rule",
-            { rule = tostring(p.rule or "") })
-        if not ok then return false end
-        lhs = tonumber(val) or 0
-
-    else
-        Warn("不支持的条件节点类型: " .. tostring(t))
-        return false
-    end
-
-    return self:_compare(lhs, tostring(p.op or ">"), rhs)
-end
-
-function Runner:_compare(lhs, op, rhs)
-    if     op == ">"  then return lhs >  rhs
-    elseif op == ">=" then return lhs >= rhs
-    elseif op == "<"  then return lhs <  rhs
-    elseif op == "<=" then return lhs <= rhs
-    elseif op == "==" then return lhs == rhs
-    elseif op == "!=" then return lhs ~= rhs
-    end
-    Warn("未知运算符: " .. op .. "，默认 false")
+    lhs = tonumber(lhs) or 0
+    local op = tostring(p.op or ">")
+    if op == ">" then return lhs > rhs end
+    if op == ">=" then return lhs >= rhs end
+    if op == "<" then return lhs < rhs end
+    if op == "<=" then return lhs <= rhs end
+    if op == "==" then return lhs == rhs end
+    if op == "!=" then return lhs ~= rhs end
     return false
 end
 
