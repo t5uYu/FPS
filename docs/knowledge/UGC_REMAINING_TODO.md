@@ -6,9 +6,9 @@
 
 ## 快速选择建议
 
-- **已完成**：T1（序列化收敛）、T4（Golden 场景回归）、T8（属性与层级）、T9（entityId 决策）、T10（UI ViewModel 化）、T13（结构化日志）、T14（备份轮转/自动保存/崩溃恢复）、T15（显式迁移链）、T17（编解码统一 + 弹道 schema）、T18（死代码清理）、T19（依赖瘦身 + 守卫 + UE 5.4 Shipping 构建验证）
+- **已完成**：T1（序列化收敛）、T3（PIE 验收 7/7）、T4（Golden 场景回归）、T5（Prefab 资产化 + AssetManager）、T8（属性与层级）、T9（entityId 决策）、T10（UI ViewModel 化）、T13（结构化日志）、T14（备份轮转/自动保存/崩溃恢复）、T15（显式迁移链）、T17（编解码统一 + 弹道 schema）、T18（死代码清理）、T19（依赖瘦身 + 守卫 + UE 5.4 Shipping 构建验证）
 - **低成本对齐（半天内）**：T2（需编辑器）、T16（需 UMG 资产改造）
-- **产品化主干**：T3（需 UE 5.4 编辑器 PIE）、T5（Prefab 资产化，T11 前置）
+- **产品化主干**：无（T3/T5 已完成，剩 T11 拆插件）
 - **多人方向**（需先定目标）：T6、T7、T12
 - **长尾治理**：T11（拆插件，依赖 T5、T10）
 
@@ -26,7 +26,7 @@
 - 验收：`WBP_UGCBlueprintEditor` 中按钮显示「验证」；Lua 侧状态文案一致。
 - 备注：改动在 `.uasset` 内，必须编辑器内改名（字节级已确认资产仍为 UTF-16「编译」）。
 
-### T3 UE 5.4 编辑器内 PIE 验收
+### ~~T3 UE 5.4 编辑器内 PIE 验收~~ ✅ 已完成
 - 优先级：P0 ｜ 规模：M ｜ 依赖：UE 5.4 编辑器
 - 目标：把代码层已完成的整改在真实运行环境确认。
 - 验收清单：
@@ -37,7 +37,10 @@
   5. Trigger Router 事件链路
   6. Authoring ↔ Playtest 双向切换 + GAS/属性/武器/规则清理
   7. AI 提案确认 / 取消与多轮 Tool Loop
-- 备注：这是当前最高价值项，代码改动只有跑过才算数。
+- 状态：**已完成（2026-09-15）**，7 项在 UE 5.4 编辑器 PIE 内实跑 **7/7 通过**（脚本化、可复现）；
+  详见「已执行记录 → T3」。鼠标手感类（真人拖 Gizmo / 点击落点）按先前约定由人工抽查，不在自动化范围。
+- 复现方式：`python Tools/UGCTests/run_pie_smoke.py`（自动起编辑器 → MCP 拉起 PIE → 跑 7 项 → 收日志 → 关 PIE）。
+- 附带产出：实跑抓出并修掉了两处**只有跑起来才暴露**的运行时断链（详见「已执行记录 → 实跑发现」）。
 
 ### T4 Golden Scene 与序列化 Golden 回归
 - 优先级：P1 ｜ 规模：M ｜ 依赖：T1
@@ -45,10 +48,14 @@
 - 验收：仓库内 3 个 Golden 场景样本（含 external/PCG、Group、Program）；CI 或脚本可比对序列化输出差异并给出定位。
 - 状态：**已完成（2026-09-14）**，验收全部满足；详见「已执行记录」。
 
-### T5 Prefab 迁移 `UPrimaryDataAsset` + `AssetManager`
+### ~~T5 Prefab 迁移 `UPrimaryDataAsset` + `AssetManager`~~ ✅ 已完成
 - 优先级：P1 ｜ 规模：L ｜ 依赖：无
 - 目标：替换 Lua 硬编码 Catalog，使 Prefab 定义可被资产化、可被 AssetManager 扫描、可在 Shipping 生效。
 - 验收：`UUGCPrefabDefinition : UPrimaryDataAsset`；ID 用 `FPrimaryAssetId`；Definition 含 ActorClass / DisplayName / Category / Tags / Bounds / Cost / AllowedModes / Version；`UGCPlaceableConfig.lua` 退化为迁移期兼容或删除。
+- 状态：**已完成（2026-09-15）**，验收全部满足（ID 空间 `UGCPrefab:<Id>` / `UGCPrefabRuntime:<Id>` 合并为一份目录，
+  磁盘资产与运行时注册（GLB）都在内）；`UGCPlaceableConfig.lua` 按拍板保留为**迁移期兜底**，不再是权威来源。
+  实跑日志证据：`prefab_registry_ready {definitions:3, catalogFallback:0, scanned:0, total:3}`，编辑器预制体列表 3 个分类全部来自 Definition。
+  详见「已执行记录 → T5」。
 
 ### T6 AI 服务端代理 + 配额 + 持久审计
 - 优先级：P1 ｜ 规模：L ｜ 依赖：需先定「单机 / 多人」目标
@@ -301,3 +308,48 @@
   - 回归：`Tools/UGCTests/run_viewmodel.lua`（10 项）：通道语义、订阅广播与异常隔离、真实 SceneData 事件→通道、
     弱引用剪枝、Detach 不影响销毁，以及 4 组接线守卫（UE Widget 不能在纯 Lua 里实例化，
     「Tick 只在需要时重绘」这一条只能靠源码断言锁住）。
+
+- **实跑发现：两处只有跑起来才暴露的运行时断链（2026-09-15，T3 的附带产出）**
+  - `Content/Script/Gameplay/UGC/Generators/Init.lua` 用了 8 处 `UGCLog.Info` 却从未 `require` 它（T13 结构化日志改造漏网）。
+    运行时 `UGCLog` 全局是 nil → `ExportFunctions` 抛异常 → `UGCFunctionRegistry:RegisterAll` 中断 →
+    **整张 LLM 工具注册表在运行时根本起不来**，`ReceiveBeginPlay` 也在那一行断掉。
+    纯 Lua 回归抓不到它，因为 `run_properties.lua` 里手动塞了 `UGCLog = require(...)` 全局 stub 把问题盖住了（已删）。
+    ps1 新增静态守卫：`Content/Script` 下任何用到 `UGCLog.` 的文件必须 `require` 它。
+  - `UGCPrefabRegistry.ListIDs` 在 `05a55fe 重构解耦` 时被删掉，但 `UGCFunctionRegistry.lua:288`（`place_object` 的 enum 来源）
+    仍在调它 → 同样让 `RegisterAll` 整体抛异常。已补 `ListIDs`，并在 `run_prefab_definitions.lua` 加「注册表对外调用面」
+    回归（扫描 `require("…").X` 调用点并断言函数存在），防止再出现「调不存在的函数」。
+
+- **T3 UE 5.4 编辑器内 PIE 验收（2026-09-15）7/7 通过**
+  - 前置（本机、不进版本库）：`Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs` 补 `DeveloperSettings` + `ContentBrowser`
+    （此前 14 个未解析符号、`UnrealEditor-UnLuaEditor.dll` 缺失，Editor 目标整体链接失败）。
+    另修一个仓库内编译错误：`Source/FPS/UGC/UGCEditorBridge.cpp` 的文件级 helper `GetParentWindowHandle` 与同模块另一 .cpp 同名，
+    unity build 下 C2668 → 改名 `GetUGCWindowHandle`。教训：**同模块的文件级 helper 必须带模块前缀**。
+  - 驱动链：`Source/FPS/UGC/UGCSmokeTestCommands.cpp`（`UGC.SmokeTestEnable` / `UGC.SmokeTest`，整体 `#if WITH_EDITOR`）
+    + `Content/Script/Gameplay/UGC/UGCSmokeTest.lua`（协作式分帧步骤机，7 项断言，结果写 `smoke_item_result` / `smoke_run_summary`）
+    + `Tools/UGCTests/run_pie_smoke.py`（起编辑器 → MCP `start_pie` → 轮询 FPS.log → `stop_pie`）。
+  - 结果（`smoke_run_summary {passed:7, failed:0}`）：
+    1. 创建/移动/删除/Undo/Redo ✓ 投影存在，Undo/Redo 逐级生效
+    2. 批量生成与原子回滚 ✓ 失败批次不消耗 sceneID / 无残留 / revision 不变；合法批次 +1 revision 且可撤销
+    3. 新旧存档加载 ✓ `project.ugc.json` 往返 2 实体（含 parentId/properties）；旧布局经 `LoadProject(目录)` 迁移加载成功
+    4. 图验证 + Delay/Interval ✓ Delay 0.51s 后生效；0.25s 周期在 1.20s 内触发 4 次（日志有 `program_print` 证明图真的执行）
+    5. Trigger Router ✓ `OnTriggerZoneEnter` → 图程序改写世界规则
+    6. Authoring↔Playtest ✓ `SpectatorPawn_1 → BP_FPSPlayer_C_0 → SpectatorPawn_1`，编辑器窗口随状态开关
+    7. AI 提案确认/取消 + 多轮 Tool Loop ✓ 写提案挂起→确认执行→只读提案自动执行→第二个写提案取消且文档不变
+  - 写 PIE 自动化脚本本身踩到的坑（已修，供后续参考）：步骤机首帧必须是 `frame == 0`（先自增会导致初始化分支永不执行）；
+    SceneData 的 Actor API 必须传**真实 `FTransform`**（`UKismetMathLibrary.MakeTransform`），9 元素表会在引擎侧 `BreakTransform` 报
+    "userdata needed but got table"；`UGCEditorCore:EnterPlayMode/EnterEditMode` 会 `CancelAllTasks()`，
+    状态被切走时待触发的 Delay/Interval 会被清掉（要重新计时而不是判失败）；`OnTriggerZoneEnter` 是无返回值回调，nil ≠ 失败。
+
+- **T5 Prefab 迁移 `UPrimaryDataAsset` + `AssetManager`（2026-09-15）**
+  - C++：`UUGCPrefabDefinition : UPrimaryDataAsset`（ActorClass / DisplayName / Category / Tags / Bounds / Cost / AllowedModes / Version / Kind）；
+    `FUGCPrefabCatalog` 统一查询并输出 JSON；桥接层新增 `GetPrefabDefinitionsJson` / `RegisterRuntimePrefabDefinition` / `IsPrefabClassPathAllowed`。
+  - 引擎约束（实跑踩到，写进 RISKS）：`AddDynamicAsset` 要求该 PrimaryAssetType **不参与磁盘扫描**（否则内部 ensure `TypeData.Info.bIsDynamicAsset` 并返回 false）
+    → 拆成 `UGCPrefab`（磁盘扫描）+ `UGCPrefabRuntime`（纯 dynamic），查询合并为一份目录；
+    `GetPrimaryAssetObject` 只返回**已在内存**的对象 → 取定义走 `GetPrimaryAssetPath(id).TryLoad()`。
+  - 配置：`Config/DefaultGame.ini` 新增 `[/Script/Engine.AssetManagerSettings]`（`PrimaryAssetType="UGCPrefab"`，扫
+    `/Game/_UGC/Prefabs` 与 `/Game/_UGC/Placeables`，`CookRule=AlwaysCook`、`bIsEditorOnly=False`）。
+  - 资产：`Content/_UGC/Prefabs/PDA_Prefab_{Box,Sphere,TriggerZone}.uasset`，由无头迁移命令
+    `UGC.CreatePrefabDefinitions` 生成（幂等：已存在则回填，可重复执行）。
+  - Lua：`UGCPrefabRegistry` 改为 Definition 优先 → Catalog 兜底 → 扫描报警；`UGCPlaceableConfig.lua` 降级为**迁移期兜底**；
+    `SpawnPlaceable` 的路径白名单改为「被定义引用 / 动态占位类 / 历史 `/Game/_UGC/Placeables/` 前缀」。
+  - 回归：`Tools/UGCTests/run_prefab_definitions.lua`（9 项，含跨模块调用面检查）。

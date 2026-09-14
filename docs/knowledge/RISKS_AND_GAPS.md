@@ -59,6 +59,46 @@
   `UnLuaEditor` 链接失败阻塞（见 T19 记录）。纯 Lua 侧可验证的都已验证（`run_viewmodel.lua` 10 项），UE Widget 侧靠源码守卫锁接线。
 - 武器弹道数据仍是两份（`Content/Data/WeaponBallistics.json` 与 `UFPSRecoilProfile` 资产），T17 只收敛了编解码与校验，没有合并数据源。
 
+## 2026-09-15 首次编辑器内实跑抓到的问题（T3/T5）
+
+- **Editor 目标建不出来的两个前置**（都已处理）：
+  1. `Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs` 缺 `DeveloperSettings` / `ContentBrowser`，
+     `UnrealEditor-UnLuaEditor.dll` 直接链接失败（14 个未解析符号：`UDeveloperSettings` 系列 +
+     `UContentBrowserAssetContextMenuContext`）。插件源码在 `.gitignore` 里，只能本机修，不进版本库。
+  2. `Source/FPS/UGC/UGCEditorBridge.cpp` 的文件级 helper `GetParentWindowHandle` 与
+     `AnimGenClient.cpp` 里的同名 helper 在 **unity build** 下撞名（`C2668 对重载函数的调用不明确`、
+     `C2737`）。这是 T19 提交留下的：UBT 把同模块多个 .cpp 编进一个 TU，文件级 helper 必须带模块前缀。
+     已改名 `GetUGCWindowHandle`。**教训：`#if WITH_EDITOR` 内的文件级 helper 也要用唯一名字。**
+- **`UAssetManager::AddDynamicAsset` 不能用在被扫描的 PrimaryAssetType 上**：
+  引擎在 `AssetManager.cpp:1304` `ensure(TypeData.Info.bIsDynamicAsset)`，而"来自磁盘扫描的类型"这条是
+  false（引擎不允许一个类型既扫描又 dynamic）。运行时导入的预制体定义改用独立类型 `UGCPrefabRuntime`
+  （纯 dynamic），磁盘定义保持 `UGCPrefab`（`PrimaryAssetTypesToScan`），两者由
+  `FUGCPrefabCatalog::GetDefinitions` 合并成同一个查询入口。
+- **纯 Lua 回归抓不到的运行时断链**：`UGCFunctionRegistry.lua:288` 调
+  `require("Gameplay.UGC.UGCPrefabRegistry").ListIDs()`，而该函数在 `05a55fe 重构解耦` 时被删掉。
+  结果 `RegisterAll` 在运行时整体抛异常，**整张 LLM 工具注册表起不来**（place_object / set_attribute /
+  提案循环全部不可用），而所有纯 Lua 测试都 mock 了 PrefabRegistry 所以全绿。
+  已补 `ListIDs` + 在 `run_prefab_definitions.lua` 加「注册表对外调用面」静态回归（扫描其它模块对注册表的
+  `require(...).Fn` / `PrefabReg:Fn` 调用，逐个断言函数存在）。这条是 T3「代码改动只有跑过才算数」的直接证据。
+- **T5 迁移工具**：`UGC.CreatePrefabDefinitions`（`Source/FPS/UGC/UGCPrefabDevCommands.cpp`，整体 `#if WITH_EDITOR`）
+  可无头重跑：读 `Content/_UGC/Placeables/placeable_manifest.json` 的语义 + 扫描该目录的 Placeable 蓝图，
+  生成/回填 `Content/_UGC/Prefabs/PDA_Prefab_<Id>`。首次执行结果：新建 Box / Sphere / TriggerZone 三个定义资产，
+  保存 3/3 个包。它需要 `UnrealEd`（`GEditor` 等编辑器符号）与 `AssetRegistry`，都放在 `bBuildEditor` 分支里。
+- **`GetPrimaryAssetObject` 只返回"已在内存"的对象**（不是惰性加载）：只调它会让定义静默解析不到、
+  注册表退回旧 Catalog（首轮实跑 `definitions:0`）。取定义要 `GetPrimaryAssetPath(id).TryLoad()`。
+- **旧存档入口的尖锐行为（未改，属"待定"）**：`UGCPersistence:LoadProject` 在收到**存在的** `.json` 文件路径时，
+  会先按 v2 package 校验并返回 `invalid_project_file`；legacy 布局（`scene.json + programs.json`）只在
+  "候选文件都不存在"时才走到，所以旧存档必须用**目录级**入口加载（实测 `LoadProject("<dir>/")` 可用）。
+  T3 冒烟脚本会把实际走的入口写进结果串；若将来要支持"直接点选 scene.json"，需要改 Persistence。
+- **`UGCStorageBridge::IsAllowedJsonPath` 对相对路径敏感**：它先 `ConvertRelativePathToFull`（相对**进程 CWD**）
+  再要求落在 `ProjectSavedDir()` 下，因此 Lua 侧传相对路径 `Saved/UGC/...` 会被拒（`Rejected non-JSON path`）。
+  调用方应传绝对路径（T3 冒烟脚本已改为 `ProjectDirectory()` 前缀）。
+- **进 Play 时 `level_main` 编译失败**：`EditorCore:EnterPlayMode` → `ProgramRunner:TriggerGameStart()`
+  → `CompileAllPrograms()` 会编译测试地图里残留的 `level_main` 并报 `compilation_failed`（每次进 Play 一条 Error，
+  不阻塞其它程序）。待确认是测试地图内的旧数据还是 schema 漂移。
+- **UnLua 侧 `AController:GetPawn()` 不可直接调用**（`method 'GetPawn' is not callable (a nil value)`）：
+  读 `pc.Pawn` 属性可用（T3 冒烟脚本的 Pawn 切换断言就是这么写的）。
+
 ## P0/P1：优先确认
 
 ### 1. PlayerState 上的 AttributeSet 死亡状态可能无法跨重生复位
@@ -247,11 +287,13 @@ Build.bat FPS Win64 Shipping -Project="<repo>/FPS.uproject" -WaitMutex -NoHotRel
 
 ## 验证缺口
 
-本次未启动 Unreal Editor，UEEditorMCP 55558 端口不可连接，因此以下内容仍需编辑器内验证：
+（2026-09-15 更新）T3 的编辑器自动化已打通：本项目现在能起 UE 5.4 编辑器、能通过 UEEditorMCP 拉起 PIE、
+能脚本化跑 7 项验收（`python Tools/UGCTests/run_pie_smoke.py`，当前 7/7）。以下内容仍**没有被验证过**：
 
-- Blueprint 的实际父类、CDO 默认属性与组件引用。
-- 各地图 World Settings/GameMode Override。
-- DataTable 的实际行值。
-- Widget Designer 中 BindWidget 名称完整性。
+- 鼠标手感类：真人拖 Gizmo、真实点击落点、拖拽跟手度（按约定由人工抽查，不在自动化范围）。
+- PIE 双客户端的 RPC、复制、重生和 UI 状态（多人链路，依赖 T6/T12 的方向决策）。
+- 进 Play 时 `level_main` 的 `compilation_failed`（见上文，待确认是地图内旧数据还是 schema 漂移）。
+- Blueprint 的实际父类、CDO 默认属性与组件引用（MCP 在线时才方便核对，索引基线里没有）。
+- 各地图 World Settings/GameMode Override、DataTable 的实际行值、Widget Designer 里 BindWidget 名称完整性。
 - Blueprint 编译状态和资源重定向器。
-- PIE 双客户端的 RPC、复制、重生和 UI 状态。
+- Shipping 包内的 AssetManager 定义是否随包（配置已写 `CookRule=AlwaysCook`，但没有实测打包后的加载）。

@@ -56,6 +56,8 @@
 - `Input/`：UGC 输入上下文和动作。
 - `Level/UGC_Test/`：UGC 测试关卡。
 - `Placeables/`：当前实际只有 Box、Sphere、TriggerZone 三个资产文件；`UGCPlaceableConfig.lua` 与 manifest 只登记这三个真实资产。
+- `Prefabs/`：T5 的定义资产 `PDA_Prefab_{Box,Sphere,TriggerZone}.uasset`（`UUGCPrefabDefinition`），
+  由无头命令 `UGC.CreatePrefabDefinitions` 生成/回填，是预制体的权威来源。
 - `UI/`：编辑器、聊天、节点图。
 
 ## 5. 核心硬编码约定
@@ -137,6 +139,10 @@ Wwise 插件描述为 EnabledByDefault。
 - Stage `Content/Script`。
 - Stage `Content/Data`（NonUFS，T17）：`WeaponBallistics.json` 由 Lua 在运行期用 `io.open` 读取，放进 pak（UFS）读不到。
 - Stage UnLua、LuaProtobuf、LuaSocket 脚本目录。
+- AssetManager（T5）：`[/Script/Engine.AssetManagerSettings]` 注册 `PrimaryAssetType="UGCPrefab"`
+  （`AssetBaseClass=/Script/FPS.UGCPrefabDefinition`，扫 `Content/_UGC/Prefabs` 与 `Content/_UGC/Placeables`，
+  `CookRule=AlwaysCook`、`bIsEditorOnly=False`）—— 定义随包、Shipping 生效。运行时注册的预制体走
+  `UGCPrefabRuntime`（dynamic 类型，不进扫描列表）。
 - Cook Wwise Tree/Types。
 
 ## 8. Wwise

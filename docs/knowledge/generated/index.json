@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-14T16:26:38.308912+00:00",
-  "git_head": "3f23a58880bec5efc7a69c96dfaa0c8f299fb818",
-  "source_fingerprint": "8610fb7a1445477f6f45950a3228d6deb1a9e8d246b20875da27317da5519af0",
+  "generated_at": "2026-09-14T17:33:12.332814+00:00",
+  "git_head": "96d155919c8d627c3077ab91785b7d3bf71d6dee",
+  "source_fingerprint": "b79f192ef29ae7d81653f72abdaacd567f9020b126cd7ed716994ca864d59dad",
   "project": {
     "name": "FPS",
     "engine_association": "5.4",
@@ -125,7 +125,7 @@
       },
       "Binaries": {
         "files": 100,
-        "bytes": 1419080689
+        "bytes": 1420783084
       },
       "Build": {
         "files": 2,
@@ -133,11 +133,11 @@
       },
       "Config": {
         "files": 18,
-        "bytes": 36789
+        "bytes": 37629
       },
       "Content": {
-        "files": 3141,
-        "bytes": 4508450659
+        "files": 3145,
+        "bytes": 4508507941
       },
       "DerivedDataCache": {
         "files": 0,
@@ -145,67 +145,67 @@
       },
       "Docs": {
         "files": 185,
-        "bytes": 19076464
+        "bytes": 19098399
       },
       "FPS_WwiseProject": {
         "files": 33,
         "bytes": 558588
       },
       "Intermediate": {
-        "files": 1023,
-        "bytes": 20393894300
+        "files": 1038,
+        "bytes": 20401249478
       },
       "Output": {
         "files": 389,
         "bytes": 8453098
       },
       "Plugins": {
-        "files": 28371,
-        "bytes": 8800310566
+        "files": 28372,
+        "bytes": 8799141067
       },
       "Saved": {
-        "files": 9954,
-        "bytes": 7834006321
+        "files": 9982,
+        "bytes": 7844570578
       },
       "Source": {
-        "files": 139,
-        "bytes": 645068
+        "files": 145,
+        "bytes": 682971
       },
       "SourceData": {
         "files": 1,
         "bytes": 2815
       },
       "Temp": {
-        "files": 29,
-        "bytes": 620135
+        "files": 31,
+        "bytes": 620571
       },
       "Tools": {
-        "files": 26,
-        "bytes": 194925
+        "files": 28,
+        "bytes": 220429
       }
     },
     "extension_counts": {
-      ".lua": 14989,
-      ".uasset": 6526,
+      ".lua": 14991,
+      ".uasset": 6529,
       ".uexp": 3330,
-      ".h": 2283,
-      ".py": 1906,
+      ".h": 2286,
+      ".py": 1907,
       ".pyc": 1888,
-      ".rsp": 1738,
+      ".rsp": 1742,
       ".ubulk": 1508,
-      ".cpp": 1463,
+      ".cpp": 1468,
       "<none>": 990,
       ".exp": 875,
       ".lib": 858,
-      ".json": 844,
-      ".obj": 634,
+      ".json": 851,
+      ".obj": 638,
       ".pdb": 613,
-      ".dll": 315,
-      ".png": 314,
+      ".png": 320,
+      ".dll": 316,
       ".md": 210,
-      ".old": 190,
-      ".log": 189,
-      ".ini": 166,
+      ".log": 195,
+      ".old": 191,
+      ".ini": 169,
       ".js": 149,
       ".ts": 139,
       ".lc": 115,
@@ -213,8 +213,8 @@
       ".umap": 75,
       ".c": 70,
       ".txt": 69,
-      ".runtime-xml": 62,
-      ".dmp": 62,
+      ".runtime-xml": 65,
+      ".dmp": 65,
       ".pak": 57,
       ".pyd": 53,
       ".res": 44,
@@ -237,14 +237,15 @@
       ".uplugin": 14,
       ".htm": 14,
       ".jpeg": 13,
+      ".bak": 13,
       ".ushaderbytecode": 12,
       ".glb": 11,
       ".gif": 9,
-      ".bak": 9,
       ".yml": 8,
       ".cache": 8,
       ".dat": 8,
       ".ps1": 8,
+      ".cmd": 6,
       ".bat": 6,
       ".inl": 6,
       ".hpp": 6,
@@ -257,7 +258,6 @@
       ".deps": 4,
       ".uhtmanifest": 4,
       ".uhtpath": 4,
-      ".cmd": 4,
       ".cfg": 4,
       ".target": 3,
       ".pth": 3,
@@ -379,6 +379,7 @@
       "dependencies": [
         "AIModule",
         "ApplicationCore",
+        "AssetRegistry",
         "Core",
         "CoreUObject",
         "Engine",
@@ -395,6 +396,7 @@
         "SlateCore",
         "UMG",
         "UnLua",
+        "UnrealEd",
         "glTFRuntime",
         "看起来没引用"
       ]
@@ -1640,7 +1642,7 @@
     },
     {
       "path": "Source/FPS/FPS.Build.cs",
-      "lines": 58,
+      "lines": 68,
       "types": [
         {
           "kind": "class",
@@ -3887,13 +3889,13 @@
     },
     {
       "path": "Source/FPS/UGC/UGCEditorBridge.cpp",
-      "lines": 347,
+      "lines": 371,
       "types": [],
       "methods": []
     },
     {
       "path": "Source/FPS/UGC/UGCEditorBridge.h",
-      "lines": 159,
+      "lines": 185,
       "types": [
         {
           "kind": "class",
@@ -3991,8 +3993,20 @@
           "line": 151
         },
         {
+          "name": "GetPrefabDefinitionsJson",
+          "line": 164
+        },
+        {
+          "name": "RegisterRuntimePrefabDefinition",
+          "line": 172
+        },
+        {
+          "name": "IsPrefabClassPathAllowed",
+          "line": 177
+        },
+        {
           "name": "GetPC",
-          "line": 152
+          "line": 178
         }
       ]
     },
@@ -4333,7 +4347,7 @@
     },
     {
       "path": "Source/FPS/UGC/UGCPlayerController.h",
-      "lines": 162,
+      "lines": 185,
       "types": [
         {
           "kind": "class",
@@ -4388,50 +4402,190 @@
           "line": 79
         },
         {
+          "name": "IsUGCSmokeTestEnabled",
+          "line": 93
+        },
+        {
+          "name": "RequestUGCSmokeTest",
+          "line": 97
+        },
+        {
+          "name": "RunUGCSmokeTest",
+          "line": 102
+        },
+        {
           "name": "EditorClick",
-          "line": 83
+          "line": 106
         },
         {
           "name": "OnTriggerZoneEnter",
-          "line": 91
+          "line": 114
         },
         {
           "name": "OnTriggerZoneExit",
-          "line": 99
+          "line": 122
         },
         {
           "name": "OnLLMResponse",
-          "line": 104
-        },
-        {
-          "name": "OnLLMError",
-          "line": 109
-        },
-        {
-          "name": "BeginPlay",
-          "line": 124
-        },
-        {
-          "name": "EndPlay",
-          "line": 126
-        },
-        {
-          "name": "SetupInputComponent",
           "line": 127
         },
         {
+          "name": "OnLLMError",
+          "line": 132
+        },
+        {
+          "name": "BeginPlay",
+          "line": 147
+        },
+        {
+          "name": "EndPlay",
+          "line": 149
+        },
+        {
+          "name": "SetupInputComponent",
+          "line": 150
+        },
+        {
           "name": "HandleUGCRuntimeEvent",
-          "line": 130
+          "line": 153
         },
         {
           "name": "HandleToggleEditorInput",
-          "line": 131
+          "line": 154
         },
         {
           "name": "HandleEditorClickInput",
-          "line": 133
+          "line": 156
         }
       ]
+    },
+    {
+      "path": "Source/FPS/UGC/UGCPrefabCatalog.cpp",
+      "lines": 246,
+      "types": [],
+      "methods": []
+    },
+    {
+      "path": "Source/FPS/UGC/UGCPrefabCatalog.h",
+      "lines": 58,
+      "types": [
+        {
+          "kind": "class",
+          "name": "FUGCPrefabCatalog",
+          "bases": ""
+        }
+      ],
+      "methods": [
+        {
+          "name": "GetDefinitions",
+          "line": 23
+        },
+        {
+          "name": "DefinitionsToJson",
+          "line": 26
+        },
+        {
+          "name": "IsClassPathAllowed",
+          "line": 32
+        },
+        {
+          "name": "RegisterRuntimeDefinition",
+          "line": 39
+        },
+        {
+          "name": "ResetRuntimeDefinitions",
+          "line": 43
+        },
+        {
+          "name": "GetRuntimeDefinitionCount",
+          "line": 46
+        },
+        {
+          "name": "KindToString",
+          "line": 49
+        },
+        {
+          "name": "KindFromString",
+          "line": 50
+        },
+        {
+          "name": "InfoFromDefinition",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "path": "Source/FPS/UGC/UGCPrefabDefinition.cpp",
+      "lines": 52,
+      "types": [],
+      "methods": []
+    },
+    {
+      "path": "Source/FPS/UGC/UGCPrefabDefinition.h",
+      "lines": 158,
+      "types": [
+        {
+          "kind": "class",
+          "name": "AActor",
+          "bases": ""
+        },
+        {
+          "kind": "class",
+          "name": "EUGCPrefabKind",
+          "bases": ""
+        },
+        {
+          "kind": "struct",
+          "name": "FUGCPlaceableInfo",
+          "bases": ""
+        },
+        {
+          "kind": "class",
+          "name": "UUGCPrefabDefinition",
+          "bases": "UPrimaryDataAsset"
+        },
+        {
+          "kind": "enum",
+          "name": "EUGCPrefabKind",
+          "bases": ""
+        }
+      ],
+      "methods": [
+        {
+          "name": "GetPrimaryAssetId",
+          "line": 145
+        },
+        {
+          "name": "GetEffectiveId",
+          "line": 149
+        },
+        {
+          "name": "GetActorClassPath",
+          "line": 153
+        },
+        {
+          "name": "ToPlaceableInfo",
+          "line": 156
+        }
+      ]
+    },
+    {
+      "path": "Source/FPS/UGC/UGCPrefabDevCommands.cpp",
+      "lines": 260,
+      "types": [
+        {
+          "kind": "struct",
+          "name": "FManifestEntry",
+          "bases": ""
+        }
+      ],
+      "methods": []
+    },
+    {
+      "path": "Source/FPS/UGC/UGCSmokeTestCommands.cpp",
+      "lines": 104,
+      "types": [],
+      "methods": []
     },
     {
       "path": "Source/FPS/UGC/UGCStorageBridge.cpp",
@@ -6640,9 +6794,10 @@
     {
       "path": "Content/Script/Gameplay/UGC/Generators/Init.lua",
       "module": "Gameplay.UGC.Generators.Init",
-      "lines": 469,
+      "lines": 473,
       "requires": [
         "Gameplay.UGC.Generators.Atoms",
+        "Gameplay.UGC.UGCLog",
         "Gameplay.UGC.UGCPrefabRegistry",
         "Gameplay.UGC.UGCSceneData",
         "Util.json"
@@ -6650,31 +6805,31 @@
       "functions": [
         {
           "name": "M.Register",
-          "line": 72
+          "line": 76
         },
         {
           "name": "M.GetDef",
-          "line": 80
+          "line": 84
         },
         {
           "name": "M.List",
-          "line": 82
+          "line": 86
         },
         {
           "name": "M.GetSchemas",
-          "line": 89
+          "line": 93
         },
         {
           "name": "M:Generate",
-          "line": 105
+          "line": 109
         },
         {
           "name": "M:ExportFunctions",
-          "line": 151
+          "line": 155
         },
         {
           "name": "M:ExportAtomsAsFunctions",
-          "line": 426
+          "line": 430
         }
       ]
     },
@@ -7223,7 +7378,7 @@
     {
       "path": "Content/Script/Gameplay/UGC/UGCLog.lua",
       "module": "Gameplay.UGC.UGCLog",
-      "lines": 316,
+      "lines": 326,
       "requires": [
         "Gameplay.UGC.UGCLog",
         "Util.json"
@@ -7231,83 +7386,83 @@
       "functions": [
         {
           "name": "Log.FormatLine",
-          "line": 146
+          "line": 156
         },
         {
           "name": "Log.ResolveCode",
-          "line": 166
+          "line": 176
         },
         {
           "name": "Log.Emit",
-          "line": 177
+          "line": 187
         },
         {
           "name": "Log.Debug",
-          "line": 200
+          "line": 210
         },
         {
           "name": "Log.Info",
-          "line": 202
+          "line": 212
         },
         {
           "name": "Log.Warn",
-          "line": 203
+          "line": 213
         },
         {
           "name": "Log.Error",
-          "line": 206
+          "line": 216
         },
         {
           "name": "Log.Command",
-          "line": 217
+          "line": 227
         },
         {
           "name": "Log.NewSession",
-          "line": 242
+          "line": 252
         },
         {
           "name": "Log.GetSession",
-          "line": 247
-        },
-        {
-          "name": "Log.SetContext",
-          "line": 251
-        },
-        {
-          "name": "Log.GetContext",
           "line": 257
         },
         {
+          "name": "Log.SetContext",
+          "line": 261
+        },
+        {
+          "name": "Log.GetContext",
+          "line": 267
+        },
+        {
           "name": "Log.ClearContext",
-          "line": 259
+          "line": 269
         },
         {
           "name": "Log.SetSink",
-          "line": 265
+          "line": 275
         },
         {
           "name": "Log.ResetSink",
-          "line": 270
+          "line": 280
         },
         {
           "name": "Log.Subscribe",
-          "line": 276
+          "line": 286
         },
         {
           "name": "Log.History",
-          "line": 284
-        },
-        {
-          "name": "Log.Counts",
           "line": 294
         },
         {
+          "name": "Log.Counts",
+          "line": 304
+        },
+        {
           "name": "Log.Sequence",
-          "line": 296
+          "line": 306
         },
         {
           "name": "Log.Reset",
-          "line": 300
+          "line": 310
         }
       ]
     },
@@ -7406,14 +7561,14 @@
     {
       "path": "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua",
       "module": "Gameplay.UGC.UGCPlaceableConfig",
-      "lines": 29,
+      "lines": 33,
       "requires": [],
       "functions": []
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCPlayerController.lua",
       "module": "Gameplay.UGC.UGCPlayerController",
-      "lines": 230,
+      "lines": 252,
       "requires": [
         "Gameplay.Core.GM",
         "Gameplay.Core.UIManager",
@@ -7429,130 +7584,147 @@
       "functions": [
         {
           "name": "M:ReceiveBeginPlay",
-          "line": 26
+          "line": 29
         },
         {
-          "name": "M:ReceiveEndPlay",
-          "line": 43
-        },
-        {
-          "name": "M:ToggleEditor",
+          "name": "M:RunUGCSmokeTest",
           "line": 51
         },
         {
+          "name": "M:ReceiveEndPlay",
+          "line": 62
+        },
+        {
+          "name": "M:ToggleEditor",
+          "line": 70
+        },
+        {
           "name": "M:ToggleBlueprintEditor",
-          "line": 57
+          "line": 76
         },
         {
           "name": "M:EditorClick",
-          "line": 74
+          "line": 93
         },
         {
           "name": "M:SetBlueprintEditor",
-          "line": 96
-        },
-        {
-          "name": "M:ScheduleCallback",
-          "line": 104
-        },
-        {
-          "name": "M:OnLLMResponse",
-          "line": 111
-        },
-        {
-          "name": "M:OnLLMError",
           "line": 115
         },
         {
+          "name": "M:ScheduleCallback",
+          "line": 123
+        },
+        {
+          "name": "M:OnLLMResponse",
+          "line": 130
+        },
+        {
+          "name": "M:OnLLMError",
+          "line": 134
+        },
+        {
           "name": "M:OnTriggerZoneEnter",
-          "line": 125
+          "line": 144
         },
         {
           "name": "M:OnTriggerZoneExit",
-          "line": 133
+          "line": 152
         },
         {
           "name": "M:ReceiveTick",
-          "line": 145
+          "line": 164
         },
         {
           "name": "M:SendToLLM",
-          "line": 220
+          "line": 242
         },
         {
           "name": "M:GetUGCFunctionList",
-          "line": 225
+          "line": 247
         }
       ]
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCPrefabRegistry.lua",
       "module": "Gameplay.UGC.UGCPrefabRegistry",
-      "lines": 365,
+      "lines": 481,
       "requires": [
         "Gameplay.UGC.UGCLog",
-        "Gameplay.UGC.UGCPlaceableConfig"
+        "Gameplay.UGC.UGCPlaceableConfig",
+        "Util.json"
       ],
       "functions": [
         {
           "name": "Registry:LoadDynamic",
-          "line": 124
+          "line": 153
+        },
+        {
+          "name": "Registry.GetSource",
+          "line": 229
+        },
+        {
+          "name": "Registry.CountBySource",
+          "line": 234
         },
         {
           "name": "Registry:SaveDynamic",
-          "line": 168
+          "line": 268
         },
         {
           "name": "Registry.GetPath",
-          "line": 176
+          "line": 276
         },
         {
           "name": "Registry.IsValid",
-          "line": 178
+          "line": 278
         },
         {
           "name": "Registry.GetKind",
-          "line": 183
+          "line": 283
+        },
+        {
+          "name": "Registry.ListIDs",
+          "line": 293
         },
         {
           "name": "Registry.GetDynamicGLB",
-          "line": 191
+          "line": 303
         },
         {
           "name": "Registry.GetRuntimeAsset",
-          "line": 196
+          "line": 308
         },
         {
           "name": "Registry.GetMeta",
-          "line": 201
+          "line": 313
         },
         {
           "name": "Registry:GetSemanticDesc",
-          "line": 205
+          "line": 317
         },
         {
           "name": "Registry:AddCustomPrefab",
-          "line": 222
+          "line": 334
         },
         {
           "name": "Registry:RemovePrefab",
-          "line": 227
+          "line": 339
         },
         {
           "name": "Registry:RegisterRuntimeAsset",
-          "line": 261
+          "line": 373
         },
         {
           "name": "Registry:RegisterDynamicGLB",
-          "line": 309
+          "line": 423
         },
         {
           "name": "Registry:ListRuntimeAssets",
-          "line": 347
+          "line": 463
         },
         {
           "name": "Registry:ListDynamicGLB",
-          "line": 356
+          "line": 472
         }
       ]
     },
@@ -7958,6 +8130,41 @@
         {
           "name": "SceneData:DeserializeProgramsJSON",
           "line": 1080
+        }
+      ]
+    },
+    {
+      "path": "Content/Script/Gameplay/UGC/UGCSmokeTest.lua",
+      "module": "Gameplay.UGC.UGCSmokeTest",
+      "lines": 913,
+      "requires": [
+        "Gameplay.UGC.UGCLog",
+        "Util.json"
+      ],
+      "functions": [
+        {
+          "name": "SmokeTest:Probe",
+          "line": 195
+        },
+        {
+          "name": "SmokeTest:Start",
+          "line": 209
+        },
+        {
+          "name": "SmokeTest:IsRunning",
+          "line": 225
+        },
+        {
+          "name": "SmokeTest:Tick",
+          "line": 229
+        },
+        {
+          "name": "SmokeTest:_finish",
+          "line": 274
+        },
+        {
+          "name": "SmokeTest:_build",
+          "line": 311
         }
       ]
     },
@@ -9839,7 +10046,7 @@
       "path": "Content/Script/Gameplay/UGC/Generators/Init.lua",
       "name": "Init",
       "kind": "lua",
-      "bytes": 21133
+      "bytes": 21472
     },
     {
       "path": "Content/Script/Gameplay/UGC/LLMGateway.lua",
@@ -9893,7 +10100,7 @@
       "path": "Content/Script/Gameplay/UGC/UGCLog.lua",
       "name": "UGCLog",
       "kind": "lua",
-      "bytes": 12569
+      "bytes": 13263
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCMigrations.lua",
@@ -9911,19 +10118,19 @@
       "path": "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua",
       "name": "UGCPlaceableConfig",
       "kind": "lua",
-      "bytes": 1166
+      "bytes": 1652
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCPlayerController.lua",
       "name": "UGCPlayerController",
       "kind": "lua",
-      "bytes": 8308
+      "bytes": 9049
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCPrefabRegistry.lua",
       "name": "UGCPrefabRegistry",
       "kind": "lua",
-      "bytes": 12304
+      "bytes": 17787
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCProgramRunner.lua",
@@ -9942,6 +10149,12 @@
       "name": "UGCSceneData",
       "kind": "lua",
       "bytes": 48348
+    },
+    {
+      "path": "Content/Script/Gameplay/UGC/UGCSmokeTest.lua",
+      "name": "UGCSmokeTest",
+      "kind": "lua",
+      "bytes": 42725
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCViewModel.lua",
@@ -10692,6 +10905,24 @@
       "name": "placeable_manifest",
       "kind": "json",
       "bytes": 1835
+    },
+    {
+      "path": "Content/_UGC/Prefabs/PDA_Prefab_Box.uasset",
+      "name": "PDA_Prefab_Box",
+      "kind": "asset",
+      "bytes": 2272
+    },
+    {
+      "path": "Content/_UGC/Prefabs/PDA_Prefab_Sphere.uasset",
+      "name": "PDA_Prefab_Sphere",
+      "kind": "asset",
+      "bytes": 2234
+    },
+    {
+      "path": "Content/_UGC/Prefabs/PDA_Prefab_TriggerZone.uasset",
+      "name": "PDA_Prefab_TriggerZone",
+      "kind": "asset",
+      "bytes": 2308
     },
     {
       "path": "Content/_UGC/UI/WBP_FabLogin.uasset",
@@ -11972,7 +12203,7 @@
       "exists": false,
       "candidate": "Content/_UGC/Editor/Actor.uasset",
       "references": [
-        "Source/FPS/UGC/UGCEditorBridge.cpp:26"
+        "Source/FPS/UGC/UGCPrefabCatalog.cpp:19"
       ]
     },
     {
@@ -12000,12 +12231,22 @@
       ]
     },
     {
+      "asset_path": "/Game/_UGC/Placeables",
+      "exists": false,
+      "candidate": "Content/_UGC/Placeables.uasset",
+      "references": [
+        "Config/DefaultGame.ini:175",
+        "Source/FPS/UGC/UGCPrefabDevCommands.cpp:41"
+      ]
+    },
+    {
       "asset_path": "/Game/_UGC/Placeables/",
       "exists": false,
       "candidate": "Content/_UGC/Placeables.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCPrefabRegistry.lua:32",
-        "Source/FPS/UGC/UGCEditorBridge.cpp:25"
+        "Content/Script/Gameplay/UGC/UGCPrefabRegistry.lua:42",
+        "Source/FPS/UGC/UGCEditorBridge.cpp:27",
+        "Source/FPS/UGC/UGCPrefabCatalog.cpp:18"
       ]
     },
     {
@@ -12013,7 +12254,7 @@
       "exists": true,
       "candidate": "Content/_UGC/Placeables/BA_Placeable_Box.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:12"
+        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:16"
       ]
     },
     {
@@ -12021,7 +12262,7 @@
       "exists": true,
       "candidate": "Content/_UGC/Placeables/BA_Placeable_Sphere.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:18"
+        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:22"
       ]
     },
     {
@@ -12037,7 +12278,16 @@
       "exists": true,
       "candidate": "Content/_UGC/Placeables/BP_Placeable_TriggerZone.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:24"
+        "Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua:28"
+      ]
+    },
+    {
+      "asset_path": "/Game/_UGC/Prefabs",
+      "exists": false,
+      "candidate": "Content/_UGC/Prefabs.uasset",
+      "references": [
+        "Config/DefaultGame.ini:175",
+        "Source/FPS/UGC/UGCPrefabDevCommands.cpp:42"
       ]
     },
     {

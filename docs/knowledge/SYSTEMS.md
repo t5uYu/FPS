@@ -222,9 +222,15 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 
 ### Prefab Catalog
 
-- Shipping 使用 `UGCPlaceableConfig.lua` 的审核 Catalog，目前只登记仓库真实存在的 Box、Sphere、TriggerZone。
-- Editor PIE 可通过 `FindFilesInDirectory` 发现开发中的 Placeable；该接口在非 Editor 构建返回空。
-- 任意玩家 BlueprintClass 路径导入已禁用，后续应由 `PrimaryDataAsset + AssetManager + 内容校验 Provider` 替代。
+- 权威来源（T5）：`UUGCPrefabDefinition`（`UPrimaryDataAsset`），PrimaryAssetId 形如 `UGCPrefab:Box`；磁盘定义资产在
+  `Content/_UGC/Prefabs/`，由 `DefaultGame.ini` 的 `PrimaryAssetTypesToScan` 扫描（`CookRule=AlwaysCook`，Shipping 也在）。
+- 运行时注册（GLB / runtime package，无磁盘资产）用 `UGCPrefabRuntime:<Id>`（纯 dynamic 类型，不能用被扫描的类型 ——
+  见 RISKS 的 `AddDynamicAsset` 约束），由 `RegisterRuntimePrefabDefinition` + `AddDynamicAsset` 登记；
+  两类由 `FUGCPrefabCatalog` 合并成同一份目录（`Source` 字段区分 `asset` / `dynamic`），Lua 侧只看这一个入口。
+- Lua 侧 `UGCPrefabRegistry.lua`：Definition 优先 → `UGCPlaceableConfig.lua` 迁移期兜底 → 扫描报警；
+  实跑证据 `prefab_registry_ready {definitions:3, catalogFallback:0, scanned:0, total:3}`。
+- `UGCEditorBridge::SpawnPlaceable` 的路径白名单改为「被定义引用的类路径 / 动态占位类 / 历史 `/Game/_UGC/Placeables/` 前缀」。
+- 任意玩家 BlueprintClass 路径导入仍禁用。
 
 ### 存档
 
@@ -302,3 +308,8 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 - Python 提供统一 MCP 服务、CLI 和约 98 个编辑器命令。
 - 能力包括 Blueprint 摘要/完整描述、组件/节点/图编辑、UMG、Material、关卡 Actor、PIE、日志。
 - 本次索引创建时 55558 不在线，因此未把 Blueprint 图内部数据写入基线。
+- **PIE 冒烟验收（T3）**：启动参数 `-ExecCmds="UGC.SmokeTestEnable"` 打开开关后，PIE 内 `UGCSmokeTest.lua`
+  自动跑 7 项并把 `smoke_item_result` / `smoke_run_summary` 写进 LogFPSUGC；也可在编辑器控制台敲 `UGC.SmokeTest`
+  手动触发（`Source/FPS/UGC/UGCSmokeTestCommands.cpp`，整体 `#if WITH_EDITOR`）。
+  一键复现：`python Tools/UGCTests/run_pie_smoke.py`（起编辑器 → MCP `start_pie` → 轮询 `Saved/Logs/FPS.log` → `stop_pie`），
+  退出码 0 表示 7/7 通过。
