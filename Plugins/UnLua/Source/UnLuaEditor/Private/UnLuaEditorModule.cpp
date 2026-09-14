@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and limitations under the License.
 
 #include "Compat/UObjectHash.h"
+#include "AssetMenu/UnLuaAssetMenu.h"
 #include "UnLuaEditorStyle.h"
 #include "UnLuaEditorCommands.h"
 #include "Misc/CoreDelegates.h"
@@ -73,6 +74,7 @@ public:
     {
         FUnLuaEditorCommands::Unregister();
         FCoreDelegates::OnPostEngineInit.RemoveAll(this);
+        FUnLuaAssetMenu::Unregister();
         UnregisterSettings();
 
 #if ENGINE_MAJOR_VERSION > 4
@@ -98,6 +100,7 @@ private:
         MainMenuToolbar->Initialize();
         BlueprintToolbar->Initialize();
         AnimationBlueprintToolbar->Initialize();
+        FUnLuaAssetMenu::Register();
         FUnLuaIntelliSenseGenerator::Get()->Initialize();
 
         IMainFrameModule& MainFrameModule = FModuleManager::LoadModuleChecked<IMainFrameModule>(TEXT("MainFrame"));

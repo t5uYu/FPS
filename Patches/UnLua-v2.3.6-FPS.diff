@@ -1,0 +1,612 @@
+diff --git a/Plugins/UnLua/Source/UnLua/Private/LuaEnv.cpp b/Plugins/UnLua/Source/UnLua/Private/LuaEnv.cpp
+index a1fd674b277aef18ffe9801a2c8791b9cdae6431..2c5682ff83038576722e9fb25ed34e73a0769ddd 100644
+--- a/Plugins/UnLua/Source/UnLua/Private/LuaEnv.cpp
++++ b/Plugins/UnLua/Source/UnLua/Private/LuaEnv.cpp
+@@ -543,6 +543,42 @@ namespace UnLua
+         ManualObjectReference.Remove(Object);
+     }
+ 
++    void FLuaEnv::PauseLuaGC()
++    {
++        if (!L)
++            return;
++
++        if (LuaGCPauseDepth++ > 0)
++            return;
++
++#if 504 == LUA_VERSION_NUM
++        bLuaGCWasRunningBeforePause = lua_gc(L, LUA_GCISRUNNING, 0) != 0;
++#else
++        bLuaGCWasRunningBeforePause = true;
++#endif
++
++        if (bLuaGCWasRunningBeforePause)
++        {
++            lua_gc(L, LUA_GCSTOP, 0);
++        }
++    }
++
++    void FLuaEnv::ResumeLuaGC()
++    {
++        if (!L || LuaGCPauseDepth <= 0)
++            return;
++
++        if (--LuaGCPauseDepth > 0)
++            return;
++
++        if (bLuaGCWasRunningBeforePause)
++        {
++            lua_gc(L, LUA_GCRESTART, 0);
++        }
++
++        bLuaGCWasRunningBeforePause = false;
++    }
++
+     int FLuaEnv::LoadFromBuiltinLibs(lua_State* L)
+     {
+         const FLuaEnv* Env = (FLuaEnv*)lua_touserdata(L, lua_upvalueindex(1));
+diff --git a/Plugins/UnLua/Source/UnLua/Private/UnLuaManager.cpp b/Plugins/UnLua/Source/UnLua/Private/UnLuaManager.cpp
+index 8b0991d78d61644a49592da7a41979eab772e91e..60471547f578805ebea36777bbd1dfa4a28df653 100644
+--- a/Plugins/UnLua/Source/UnLua/Private/UnLuaManager.cpp
++++ b/Plugins/UnLua/Source/UnLua/Private/UnLuaManager.cpp
+@@ -29,6 +29,33 @@
+ 
+ static const TCHAR* SReadableInputEvent[] = { TEXT("Pressed"), TEXT("Released"), TEXT("Repeat"), TEXT("DoubleClick"), TEXT("Axis"), TEXT("Max") };
+ 
++namespace
++{
++    class FScopedLuaGCPause
++    {
++    public:
++        explicit FScopedLuaGCPause(UnLua::FLuaEnv* InEnv)
++            : Env(InEnv)
++        {
++            if (Env)
++            {
++                Env->PauseLuaGC();
++            }
++        }
++
++        ~FScopedLuaGCPause()
++        {
++            if (Env)
++            {
++                Env->ResumeLuaGC();
++            }
++        }
++
++    private:
++        UnLua::FLuaEnv* Env;
++    };
++}
++
+ UUnLuaManager::UUnLuaManager()
+     : InputActionFunc(nullptr), InputAxisFunc(nullptr), InputTouchFunc(nullptr), InputVectorAxisFunc(nullptr), InputGestureFunc(nullptr), AnimNotifyFunc(nullptr)
+ {
+@@ -60,38 +87,42 @@ bool UUnLuaManager::Bind(UObject *Object, const TCHAR *InModuleName, int32 Initi
+     const auto Class = Object->IsA<UClass>() ? static_cast<UClass*>(Object) : Object->GetClass();
+     lua_State *L = Env->GetMainState();
+ 
+-    if (!Env->GetClassRegistry()->Register(Class))
+-        return false;
+-
+-    // try bind lua if not bind or use a copyed table
+-    UnLua::FLuaRetValues RetValues = UnLua::Call(L, "require", TCHAR_TO_UTF8(InModuleName));
+-    FString Error;
+-    if (!RetValues.IsValid() || RetValues.Num() == 0)
+-    {
+-        Error = "invalid return value of require()";
+-    }
+-    else if (RetValues[0].GetType() != LUA_TTABLE)
+     {
+-        Error = FString("table needed but got ");
+-        if(RetValues[0].GetType() == LUA_TSTRING)
+-            Error += UTF8_TO_TCHAR(RetValues[0].Value<const char*>());
++        FScopedLuaGCPause ScopedLuaGCPause(Env);
++
++        if (!Env->GetClassRegistry()->Register(Class))
++            return false;
++
++        // try bind lua if not bind or use a copyed table
++        UnLua::FLuaRetValues RetValues = UnLua::Call(L, "require", TCHAR_TO_UTF8(InModuleName));
++        FString Error;
++        if (!RetValues.IsValid() || RetValues.Num() == 0)
++        {
++            Error = "invalid return value of require()";
++        }
++        else if (RetValues[0].GetType() != LUA_TTABLE)
++        {
++            Error = FString("table needed but got ");
++            if(RetValues[0].GetType() == LUA_TSTRING)
++                Error += UTF8_TO_TCHAR(RetValues[0].Value<const char*>());
++            else
++                Error += UTF8_TO_TCHAR(lua_typename(L, RetValues[0].GetType()));
++        }
+         else
+-            Error += UTF8_TO_TCHAR(lua_typename(L, RetValues[0].GetType()));
+-    }
+-    else
+-    {
+-        BindClass(Class, InModuleName, Error);
+-    }
++        {
++            BindClass(Class, InModuleName, Error);
++        }
+ 
+-    if (!Error.IsEmpty())
+-    {
+-        UE_LOG(LogUnLua, Warning, TEXT("Failed to attach %s module for object %s,%p!\n%s"), InModuleName, *Object->GetName(), Object, *Error);
+-        return false;
+-    }
++        if (!Error.IsEmpty())
++        {
++            UE_LOG(LogUnLua, Warning, TEXT("Failed to attach %s module for object %s,%p!\n%s"), InModuleName, *Object->GetName(), Object, *Error);
++            return false;
++        }
+ 
+-    // create a Lua instance for this UObject
+-    Env->GetObjectRegistry()->Bind(Class);
+-    Env->GetObjectRegistry()->Bind(Object);
++        // Protect the bind critical section from automatic Lua GC re-entry.
++        Env->GetObjectRegistry()->Bind(Class);
++        Env->GetObjectRegistry()->Bind(Object);
++    }
+ 
+     // try call user first user function handler
+     int32 FunctionRef = PushFunction(L, Object, "Initialize");                  // push hard coded Lua function 'Initialize'
+diff --git a/Plugins/UnLua/Source/UnLua/Public/LuaEnv.h b/Plugins/UnLua/Source/UnLua/Public/LuaEnv.h
+index 13f89e437b14a1e95819a4707f85cbeecf8b1cc8..31bc9f11bbfd7c33832cce5ecee1e8bc214aeb87 100644
+--- a/Plugins/UnLua/Source/UnLua/Public/LuaEnv.h
++++ b/Plugins/UnLua/Source/UnLua/Public/LuaEnv.h
+@@ -120,6 +120,10 @@ namespace UnLua
+ 
+         void RemoveManualObjectReference(UObject* Object);
+ 
++        void PauseLuaGC();
++
++        void ResumeLuaGC();
++
+     protected:
+         lua_State* L;
+ 
+@@ -182,6 +186,8 @@ namespace UnLua
+         TArray<UInputComponent*> CandidateInputComponents;
+         FDelegateHandle OnWorldTickStartHandle;
+         FString Name = TEXT("Env_0");
++        int32 LuaGCPauseDepth = 0;
++        bool bLuaGCWasRunningBeforePause = false;
+         bool bObjectArrayListenerRegistered;
+         bool bStarted;
+     };
+diff --git a/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.cpp b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..94f91e13772f4aa8f5e111b3633347e0e1a35942
+--- /dev/null
++++ b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.cpp
+@@ -0,0 +1,278 @@
++#include "AssetMenu/UnLuaAssetMenu.h"
++#include "AssetMenu/UnLuaLuaEditorSettings.h"
++
++#include "AssetRegistry/AssetData.h"
++#include "ContentBrowserMenuContexts.h"
++#include "EdGraph/EdGraph.h"
++#include "EdGraph/EdGraphNode.h"
++#include "EdGraph/EdGraphPin.h"
++#include "EdGraphSchema_K2.h"
++#include "Engine/Blueprint.h"
++#include "Framework/Notifications/NotificationManager.h"
++#include "LuaModuleLocator.h"
++#include "Misc/Paths.h"
++#include "Styling/AppStyle.h"
++#include "ToolMenus.h"
++#include "UnLuaInterface.h"
++#include "UnLuaPrivate.h"
++#include "UnLuaSettings.h"
++#include "Widgets/Notifications/SNotificationList.h"
++
++#define LOCTEXT_NAMESPACE "UnLuaAssetMenu"
++
++DEFINE_LOG_CATEGORY_STATIC(LogUnLuaAssetMenu, Log, All);
++
++namespace
++{
++    const FName MenuOwner("UnLuaAssetMenu");
++    const FName AssetContextMenuName("ContentBrowser.AssetContextMenu");
++}
++
++void FUnLuaAssetMenu::Register()
++{
++    UToolMenus* ToolMenus = UToolMenus::Get();
++    if (!ToolMenus)
++        return;
++
++    FToolMenuOwnerScoped OwnerScoped(MenuOwner);
++    UToolMenu* Menu = ToolMenus->ExtendMenu(AssetContextMenuName);
++    Menu->AddDynamicSection(
++        "UnLuaScripts",
++        FNewToolMenuDelegate::CreateStatic(&FUnLuaAssetMenu::FillAssetContextMenu),
++        FToolMenuInsert("CommonAssetActions", EToolMenuInsertType::After));
++}
++
++void FUnLuaAssetMenu::Unregister()
++{
++    if (UToolMenus* ToolMenus = UToolMenus::Get())
++        ToolMenus->UnregisterOwnerByName(MenuOwner);
++}
++
++void FUnLuaAssetMenu::FillAssetContextMenu(UToolMenu* Menu)
++{
++    if (!Menu)
++        return;
++
++    const UContentBrowserAssetContextMenuContext* Context =
++        Menu->FindContext<UContentBrowserAssetContextMenuContext>();
++    if (!Context)
++        return;
++
++    TArray<FUnLuaScriptReference> Scripts;
++    for (const FAssetData& AssetData : Context->SelectedAssets)
++    {
++        FUnLuaScriptReference Script;
++        if (ResolveAsset(AssetData, Script))
++            Scripts.Add(MoveTemp(Script));
++    }
++
++    if (Scripts.IsEmpty())
++        return;
++
++    FToolMenuSection& Section = Menu->AddSection("UnLua", LOCTEXT("Section", "UnLua"));
++    const FText OpenLabel = Scripts.Num() == 1
++        ? LOCTEXT("OpenLuaScript", "Open Lua Script")
++        : FText::Format(LOCTEXT("OpenLuaScripts", "Open Lua Scripts ({0})"), Scripts.Num());
++
++    Section.AddMenuEntry(
++        "OpenLuaScript",
++        OpenLabel,
++        LOCTEXT("OpenLuaScriptTooltip", "Open the Lua file resolved from UnLua GetModuleName"),
++        FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
++        FUIAction(FExecuteAction::CreateStatic(&FUnLuaAssetMenu::OpenScripts, Scripts)));
++
++    Section.AddMenuEntry(
++        "RevealLuaScript",
++        LOCTEXT("RevealLuaScript", "Reveal Lua Script in Explorer"),
++        LOCTEXT("RevealLuaScriptTooltip", "Reveal the bound Lua file in the system file explorer"),
++        FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.ShowInExplorer"),
++        FUIAction(FExecuteAction::CreateStatic(&FUnLuaAssetMenu::RevealScripts, Scripts)));
++}
++
++bool FUnLuaAssetMenu::ResolveAsset(
++    const FAssetData& AssetData,
++    FUnLuaScriptReference& OutReference)
++{
++    if (!AssetData.IsValid() || !AssetData.IsInstanceOf(UBlueprint::StaticClass()))
++        return false;
++
++    const UBlueprint* Blueprint = Cast<UBlueprint>(AssetData.GetAsset());
++    if (!Blueprint)
++        return false;
++
++    OutReference.AssetName = Blueprint->GetName();
++    OutReference.ModuleName = ReadModuleName(Blueprint);
++    if (OutReference.ModuleName.IsEmpty())
++        return false;
++
++    OutReference.AbsolutePath = ModuleNameToFilePath(OutReference.ModuleName);
++    OutReference.bFileExists = FPaths::FileExists(OutReference.AbsolutePath);
++    return true;
++}
++
++FString FUnLuaAssetMenu::ReadModuleName(const UBlueprint* Blueprint)
++{
++    if (UClass* GeneratedClass = Blueprint->GeneratedClass)
++    {
++        const UUnLuaSettings* Settings = GetDefault<UUnLuaSettings>();
++        if (Settings && Settings->ModuleLocatorClass)
++        {
++            ULuaModuleLocator* Locator =
++                Cast<ULuaModuleLocator>(Settings->ModuleLocatorClass->GetDefaultObject());
++            if (Locator)
++            {
++                const FString Located = NormalizeModuleName(Locator->Locate(GeneratedClass));
++                if (!Located.IsEmpty())
++                    return Located;
++            }
++        }
++    }
++
++    return NormalizeModuleName(ReadModuleNameFromGraph(Blueprint));
++}
++
++FString FUnLuaAssetMenu::ReadModuleNameFromGraph(const UBlueprint* Blueprint)
++{
++    for (const FBPInterfaceDescription& Description : Blueprint->ImplementedInterfaces)
++    {
++        if (Description.Interface != UUnLuaInterface::StaticClass())
++            continue;
++
++        for (const UEdGraph* Graph : Description.Graphs)
++        {
++            if (!Graph || Graph->GetFName() != FName(TEXT("GetModuleName")))
++                continue;
++
++            for (const UEdGraphNode* Node : Graph->Nodes)
++            {
++                if (!Node)
++                    continue;
++
++                for (const UEdGraphPin* Pin : Node->Pins)
++                {
++                    if (Pin
++                        && Pin->Direction == EGPD_Output
++                        && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_String
++                        && !Pin->DefaultValue.IsEmpty())
++                    {
++                        return Pin->DefaultValue;
++                    }
++                }
++            }
++        }
++    }
++
++    return FString();
++}
++
++FString FUnLuaAssetMenu::NormalizeModuleName(FString ModuleName)
++{
++    ModuleName.TrimStartAndEndInline();
++    ModuleName.ReplaceInline(TEXT("\\"), TEXT("."));
++    ModuleName.ReplaceInline(TEXT("/"), TEXT("."));
++    if (ModuleName.EndsWith(TEXT(".lua"), ESearchCase::IgnoreCase))
++        ModuleName.LeftChopInline(4);
++    if (ModuleName.StartsWith(TEXT("Script.")))
++        ModuleName.RightChopInline(7);
++    return ModuleName;
++}
++
++FString FUnLuaAssetMenu::ModuleNameToFilePath(const FString& ModuleName)
++{
++    const FString RelativePath =
++        NormalizeModuleName(ModuleName).Replace(TEXT("."), TEXT("/")) + TEXT(".lua");
++    return FPaths::ConvertRelativePathToFull(GLuaSrcFullPath / RelativePath);
++}
++
++void FUnLuaAssetMenu::OpenScripts(TArray<FUnLuaScriptReference> Scripts)
++{
++    for (const FUnLuaScriptReference& Script : Scripts)
++    {
++        if (Script.bFileExists)
++            OpenScript(Script.AbsolutePath);
++        else
++            NotifyMissing(Script);
++    }
++}
++
++void FUnLuaAssetMenu::OpenScript(const FString& AbsolutePath)
++{
++    const UUnLuaLuaEditorSettings* Settings = GetDefault<UUnLuaLuaEditorSettings>();
++    if (Settings && Settings->OpenMode == EUnLuaExternalEditorMode::CustomExecutable)
++    {
++        FString Executable = Settings->CustomEditorExecutable.FilePath;
++        if (FPaths::IsRelative(Executable))
++            Executable = FPaths::ConvertRelativePathToFull(Executable);
++
++        if (FPaths::FileExists(Executable))
++        {
++            FString Arguments = Settings->CustomEditorArguments;
++            if (Arguments.Contains(TEXT("{File}")))
++                Arguments.ReplaceInline(TEXT("{File}"), *AbsolutePath);
++            else
++                Arguments += FString::Printf(TEXT(" \"%s\""), *AbsolutePath);
++            Arguments.ReplaceInline(TEXT("{Line}"), TEXT("1"));
++
++            const FProcHandle Process = FPlatformProcess::CreateProc(
++                *Executable, *Arguments, true, false, false, nullptr, 0, nullptr, nullptr);
++            if (Process.IsValid())
++                return;
++
++            NotifyEditorFallback(
++                FString::Printf(TEXT("Could not launch custom editor: %s"), *Executable));
++        }
++        else
++        {
++            NotifyEditorFallback(
++                FString::Printf(TEXT("Custom editor does not exist: %s"), *Executable));
++        }
++    }
++
++    FPlatformProcess::LaunchFileInDefaultExternalApplication(*AbsolutePath);
++}
++
++void FUnLuaAssetMenu::RevealScripts(TArray<FUnLuaScriptReference> Scripts)
++{
++    for (const FUnLuaScriptReference& Script : Scripts)
++    {
++        if (Script.bFileExists)
++            FPlatformProcess::ExploreFolder(*Script.AbsolutePath);
++        else
++            NotifyMissing(Script);
++    }
++}
++
++void FUnLuaAssetMenu::NotifyMissing(const FUnLuaScriptReference& Script)
++{
++    const FText Text = FText::Format(
++        LOCTEXT("LuaFileMissing", "Lua file not found: {0}"),
++        FText::FromString(Script.AbsolutePath));
++    FNotificationInfo Info(Text);
++    Info.ExpireDuration = 5.0f;
++    Info.bUseSuccessFailIcons = true;
++    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(
++        SNotificationItem::CS_Fail);
++
++    UE_LOG(
++        LogUnLuaAssetMenu,
++        Warning,
++        TEXT("Lua script not found for %s (module=%s, path=%s)"),
++        *Script.AssetName,
++        *Script.ModuleName,
++        *Script.AbsolutePath);
++}
++
++void FUnLuaAssetMenu::NotifyEditorFallback(const FString& Reason)
++{
++    const FText Text = FText::Format(
++        LOCTEXT("LuaEditorFallback", "{0}. Falling back to the system default application."),
++        FText::FromString(Reason));
++    FNotificationInfo Info(Text);
++    Info.ExpireDuration = 5.0f;
++    Info.bUseSuccessFailIcons = true;
++    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(
++        SNotificationItem::CS_Fail);
++    UE_LOG(LogUnLuaAssetMenu, Warning, TEXT("%s"), *Text.ToString());
++}
++
++#undef LOCTEXT_NAMESPACE
+diff --git a/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.h b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..163c0c015029be8c54531ff035370b7248060635
+--- /dev/null
++++ b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaAssetMenu.h
+@@ -0,0 +1,35 @@
++#pragma once
++
++#include "CoreMinimal.h"
++
++struct FAssetData;
++class UBlueprint;
++class UToolMenu;
++
++struct FUnLuaScriptReference
++{
++    FString AssetName;
++    FString ModuleName;
++    FString AbsolutePath;
++    bool bFileExists = false;
++};
++
++class FUnLuaAssetMenu
++{
++public:
++    static void Register();
++    static void Unregister();
++
++private:
++    static void FillAssetContextMenu(UToolMenu* Menu);
++    static bool ResolveAsset(const FAssetData& AssetData, FUnLuaScriptReference& OutReference);
++    static FString ReadModuleName(const UBlueprint* Blueprint);
++    static FString ReadModuleNameFromGraph(const UBlueprint* Blueprint);
++    static FString NormalizeModuleName(FString ModuleName);
++    static FString ModuleNameToFilePath(const FString& ModuleName);
++    static void OpenScripts(TArray<FUnLuaScriptReference> Scripts);
++    static void OpenScript(const FString& AbsolutePath);
++    static void RevealScripts(TArray<FUnLuaScriptReference> Scripts);
++    static void NotifyMissing(const FUnLuaScriptReference& Script);
++    static void NotifyEditorFallback(const FString& Reason);
++};
+diff --git a/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaLuaEditorSettings.h b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaLuaEditorSettings.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d80e559bf3f4bae10fa3c42ea6da90e87646610e
+--- /dev/null
++++ b/Plugins/UnLua/Source/UnLuaEditor/Private/AssetMenu/UnLuaLuaEditorSettings.h
+@@ -0,0 +1,57 @@
++#pragma once
++
++#include "CoreMinimal.h"
++#include "Engine/DeveloperSettings.h"
++#include "Engine/EngineTypes.h"
++#include "UnLuaLuaEditorSettings.generated.h"
++
++UENUM()
++enum class EUnLuaExternalEditorMode : uint8
++{
++    SystemDefault UMETA(DisplayName = "System Default"),
++    CustomExecutable UMETA(DisplayName = "Custom Editor"),
++};
++
++/** Per-user preferences for opening Lua files from the Unreal Editor. */
++UCLASS(Config = EditorPerProjectUserSettings, meta = (DisplayName = "UnLua Lua Editor"))
++class UUnLuaLuaEditorSettings : public UDeveloperSettings
++{
++    GENERATED_BODY()
++
++public:
++    UPROPERTY(Config, EditAnywhere, Category = "Lua Editor")
++    EUnLuaExternalEditorMode OpenMode = EUnLuaExternalEditorMode::SystemDefault;
++
++    UPROPERTY(
++        Config,
++        EditAnywhere,
++        Category = "Lua Editor",
++        meta = (
++            EditCondition = "OpenMode == EUnLuaExternalEditorMode::CustomExecutable",
++            EditConditionHides,
++            FilePathFilter = "Executable files (*.exe)|*.exe"
++        )
++    )
++    FFilePath CustomEditorExecutable;
++
++    /**
++     * Arguments passed to the custom editor.
++     * Tokens: {File} = absolute Lua path, {Line} = 1.
++     * Cursor: -g "{File}:{Line}", VS Code: --goto "{File}:{Line}"
++     */
++    UPROPERTY(
++        Config,
++        EditAnywhere,
++        Category = "Lua Editor",
++        meta = (
++            EditCondition = "OpenMode == EUnLuaExternalEditorMode::CustomExecutable",
++            EditConditionHides
++        )
++    )
++    FString CustomEditorArguments = TEXT("\"{File}\"");
++
++    virtual FName GetCategoryName() const override
++    {
++        return TEXT("Plugins");
++    }
++};
+diff --git a/Plugins/UnLua/Source/UnLuaEditor/Private/UnLuaEditorModule.cpp b/Plugins/UnLua/Source/UnLuaEditor/Private/UnLuaEditorModule.cpp
+index 66260d68f1ba7d67775ed1f4e92316b5f9a9daee..8a40ebd3c316aff0d291a541e54f26a4ed2e2fd7 100644
+--- a/Plugins/UnLua/Source/UnLuaEditor/Private/UnLuaEditorModule.cpp
++++ b/Plugins/UnLua/Source/UnLuaEditor/Private/UnLuaEditorModule.cpp
+@@ -13,6 +13,7 @@
+ // See the License for the specific language governing permissions and limitations under the License.
+ 
+ #include "Compat/UObjectHash.h"
++#include "AssetMenu/UnLuaAssetMenu.h"
+ #include "UnLuaEditorStyle.h"
+ #include "UnLuaEditorCommands.h"
+ #include "Misc/CoreDelegates.h"
+@@ -73,6 +74,7 @@ public:
+     {
+         FUnLuaEditorCommands::Unregister();
+         FCoreDelegates::OnPostEngineInit.RemoveAll(this);
++        FUnLuaAssetMenu::Unregister();
+         UnregisterSettings();
+ 
+ #if ENGINE_MAJOR_VERSION > 4
+@@ -98,6 +100,7 @@ private:
+         MainMenuToolbar->Initialize();
+         BlueprintToolbar->Initialize();
+         AnimationBlueprintToolbar->Initialize();
++        FUnLuaAssetMenu::Register();
+         FUnLuaIntelliSenseGenerator::Get()->Initialize();
+ 
+         IMainFrameModule& MainFrameModule = FModuleManager::LoadModuleChecked<IMainFrameModule>(TEXT("MainFrame"));
+diff --git a/Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs b/Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs
+index 5334bbe488adf4d180d6e35f46337c476cd5e5df..376044788ec6881a954f77332ba34504a0fc674b 100644
+--- a/Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs
++++ b/Plugins/UnLua/Source/UnLuaEditor/UnLuaEditor.Build.cs
+@@ -73,6 +73,11 @@ public class UnLuaEditor : ModuleRules
+                 "UMG",
+                 "UMGEditor",
+                 "BlueprintGraph",
++                "ContentBrowser",
++                "AssetRegistry",
++#if UE_5_0_OR_LATER
++                "DeveloperSettings",
++#endif
+                 "Slate",
+                 "SlateCore",
+                 "DirectoryWatcher",

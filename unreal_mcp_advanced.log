@@ -6648,3 +6648,20 @@
 2026-04-30 19:16:43,681 - mcp.server.lowlevel.server - DEBUG - [server.py:790] - Response sent
 2026-04-30 19:27:49,049 - UnrealMCP_Advanced - INFO - [unreal_mcp_server_advanced.py:371] - Unreal connection reset
 2026-04-30 19:27:49,049 - UnrealMCP_Advanced - INFO - [unreal_mcp_server_advanced.py:383] - Unreal MCP Advanced server shut down
+2026-09-02 21:44:13,331 - mcp.server.lowlevel.server - DEBUG - [server.py:162] - Initializing server 'UnrealMCP_Advanced'
+2026-09-02 21:44:13,331 - mcp.server.lowlevel.server - DEBUG - [server.py:439] - Registering handler for ListToolsRequest
+2026-09-02 21:44:13,331 - mcp.server.lowlevel.server - DEBUG - [server.py:519] - Registering handler for CallToolRequest
+2026-09-02 21:44:13,332 - mcp.server.lowlevel.server - DEBUG - [server.py:301] - Registering handler for ListResourcesRequest
+2026-09-02 21:44:13,332 - mcp.server.lowlevel.server - DEBUG - [server.py:336] - Registering handler for ReadResourceRequest
+2026-09-02 21:44:13,332 - mcp.server.lowlevel.server - DEBUG - [server.py:263] - Registering handler for PromptListRequest
+2026-09-02 21:44:13,332 - mcp.server.lowlevel.server - DEBUG - [server.py:285] - Registering handler for GetPromptRequest
+2026-09-02 21:44:13,332 - mcp.server.lowlevel.server - DEBUG - [server.py:321] - Registering handler for ListResourceTemplatesRequest
+2026-09-02 21:44:13,417 - UnrealMCP_Advanced - INFO - [unreal_mcp_server_advanced.py:2744] - Starting Advanced MCP server with stdio transport
+2026-09-02 21:44:13,424 - asyncio - DEBUG - [proactor_events.py:633] - Using proactor: IocpProactor
+2026-09-02 21:44:13,427 - UnrealMCP_Advanced - INFO - [unreal_mcp_server_advanced.py:376] - UnrealMCP Advanced server starting up
+2026-09-02 21:44:13,427 - UnrealMCP_Advanced - INFO - [unreal_mcp_server_advanced.py:377] - Connection will be established lazily on first tool call
+2026-09-02 21:44:13,432 - mcp.server.lowlevel.server - DEBUG - [server.py:675] - Received message: root=InitializedNotification(method='notifications/initialized', params=None, jsonrpc='2.0')
+2026-09-02 21:44:13,434 - mcp.server.lowlevel.server - DEBUG - [server.py:675] - Received message: <mcp.shared.session.RequestResponder object at 0x000002601F387B50>
+2026-09-02 21:44:13,434 - mcp.server.lowlevel.server - INFO - [server.py:720] - Processing request of type ListToolsRequest
+2026-09-02 21:44:13,434 - mcp.server.lowlevel.server - DEBUG - [server.py:723] - Dispatching request of type ListToolsRequest
+2026-09-02 21:44:13,435 - mcp.server.lowlevel.server - DEBUG - [server.py:790] - Response sent

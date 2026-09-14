@@ -90,7 +90,7 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\DearMe\\.nuget\\packages\\": {},
+    "C:\\Users\\DearMe\\AppData\\Local\\Temp\\cursor-sandbox-cache\\8eb6bff3c5851684812305c31e9ddfb1\\nuget": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
@@ -99,10 +99,9 @@
       "projectUniqueName": "C:\\Users\\DearMe\\Documents\\Unreal Projects\\FPS\\Plugins\\UnLua\\Source\\UnLuaDefaultParamCollectorUbtPlugin\\UnLuaDefaultParamCollectorUbtPlugin.ubtplugin.csproj",
       "projectName": "UnLuaDefaultParamCollectorUbtPlugin",
       "projectPath": "C:\\Users\\DearMe\\Documents\\Unreal Projects\\FPS\\Plugins\\UnLua\\Source\\UnLuaDefaultParamCollectorUbtPlugin\\UnLuaDefaultParamCollectorUbtPlugin.ubtplugin.csproj",
-      "packagesPath": "C:\\Users\\DearMe\\.nuget\\packages\\",
+      "packagesPath": "C:\\Users\\DearMe\\AppData\\Local\\Temp\\cursor-sandbox-cache\\8eb6bff3c5851684812305c31e9ddfb1\\nuget",
       "outputPath": "C:\\Users\\DearMe\\Documents\\Unreal Projects\\FPS\\Plugins\\UnLua\\Source\\UnLuaDefaultParamCollectorUbtPlugin\\obj\\",
       "projectStyle": "PackageReference",
-      "UsingMicrosoftNETSdk": false,
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
@@ -129,11 +128,6 @@
         "warnAsError": [
           "NU1605"
         ]
-      },
-      "restoreAuditProperties": {
-        "enableAudit": "true",
-        "auditLevel": "low",
-        "auditMode": "direct"
       }
     },
     "frameworks": {

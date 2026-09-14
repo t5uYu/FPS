@@ -73,6 +73,11 @@ public class UnLuaEditor : ModuleRules
                 "UMG",
                 "UMGEditor",
                 "BlueprintGraph",
+                "ContentBrowser",
+                "AssetRegistry",
+#if UE_5_0_OR_LATER
+                "DeveloperSettings",
+#endif
                 "Slate",
                 "SlateCore",
                 "DirectoryWatcher",
