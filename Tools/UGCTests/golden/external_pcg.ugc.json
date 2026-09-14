@@ -1,0 +1,92 @@
+{
+  "document": {
+    "entities": [
+      {
+        "actorId": "actor_1",
+        "entityId": "ugc-golden-external-pcg-entity-1",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Box",
+        "programId": "actor_prog_1",
+        "properties": [
+          
+        ],
+        "sceneID": 1,
+        "tags": [
+          
+        ],
+        "transform": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actorId": "actor_2",
+        "entityId": "ugc-golden-external-pcg-entity-2",
+        "external": true,
+        "metadata": {
+          "graph": "/Game/_UGC/PCG/PCG_PineForest",
+          "kind": "pcg",
+          "radius": 800,
+          "seed": 20260914,
+          "x": 1200,
+          "y": -350,
+          "z": 25
+        },
+        "prefabName": "PCG_Generated",
+        "programId": "actor_prog_2",
+        "properties": [
+          
+        ],
+        "sceneID": 2,
+        "tags": [
+          
+        ],
+        "transform": [
+          1200,
+          -350,
+          25,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "generatedGroups": [
+      
+    ],
+    "header": {
+      "contentVersion": "1",
+      "documentId": "ugc-golden-external-pcg",
+      "revision": 4,
+      "schemaVersion": 3
+    },
+    "nextBatchID": 1,
+    "nextSceneID": 3,
+    "programs": [
+      
+    ],
+    "worldSettings": {
+      "FriendlyFire": 0,
+      "GravityScale": 1.5
+    }
+  },
+  "editor": {
+    "activeProgramId": "level_main",
+    "selectedSceneID": 2
+  },
+  "packageVersion": 1,
+  "savedAt": 0
+}

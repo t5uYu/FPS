@@ -126,6 +126,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_serialization.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $LuaExe (Join-Path $PSScriptRoot "run_golden.lua") $RootLua
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_registry.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $LuaExe (Join-Path $PSScriptRoot "run_logging.lua") $RootLua

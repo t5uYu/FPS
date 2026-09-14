@@ -1,0 +1,163 @@
+{
+  "document": {
+    "entities": [
+      {
+        "actorId": "actor_1",
+        "entityId": "ugc-golden-program-entity-1",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "TriggerZone",
+        "programId": "actor_prog_1",
+        "properties": [
+          
+        ],
+        "sceneID": 1,
+        "tags": [
+          
+        ],
+        "transform": [
+          -900,
+          120,
+          0,
+          0,
+          90,
+          0,
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "actorId": "actor_2",
+        "entityId": "ugc-golden-program-entity-2",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Box",
+        "programId": "actor_prog_2",
+        "properties": [
+          
+        ],
+        "sceneID": 2,
+        "tags": [
+          
+        ],
+        "transform": [
+          -600,
+          120,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "generatedGroups": [
+      
+    ],
+    "header": {
+      "contentVersion": "1",
+      "documentId": "ugc-golden-program",
+      "revision": 4,
+      "schemaVersion": 3
+    },
+    "nextBatchID": 1,
+    "nextSceneID": 3,
+    "programs": {
+      "actor_prog_1": {
+        "connections": [
+          {
+            "from_id": "enter",
+            "from_pin": "exec_out",
+            "to_id": "delay",
+            "to_pin": "exec_in"
+          },
+          {
+            "from_id": "delay",
+            "from_pin": "exec_out",
+            "to_id": "print",
+            "to_pin": "exec_in"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "enter",
+            "params": [
+              
+            ],
+            "type": "Event_OnEnter"
+          },
+          {
+            "id": "delay",
+            "params": {
+              "seconds": "0.5"
+            },
+            "type": "Delay"
+          },
+          {
+            "id": "print",
+            "params": {
+              "msg": "玩家进入触发区"
+            },
+            "type": "Print_Message"
+          }
+        ]
+      },
+      "level_main": {
+        "connections": [
+          {
+            "from_id": "event",
+            "from_pin": "exec_out",
+            "to_id": "rule",
+            "to_pin": "exec_in"
+          },
+          {
+            "from_id": "rule",
+            "from_pin": "exec_out",
+            "to_id": "print",
+            "to_pin": "exec_in"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "event",
+            "params": [
+              
+            ],
+            "type": "Event_OnGameStart"
+          },
+          {
+            "id": "rule",
+            "params": {
+              "rule": "GravityScale",
+              "value": "0.8"
+            },
+            "type": "Set_GameRule"
+          },
+          {
+            "id": "print",
+            "params": {
+              "msg": "关卡规则已应用"
+            },
+            "type": "Print_Message"
+          }
+        ]
+      }
+    },
+    "worldSettings": [
+      
+    ]
+  },
+  "editor": {
+    "activeProgramId": "level_main",
+    "selectedProgramId": "actor_prog_1"
+  },
+  "packageVersion": 1,
+  "savedAt": 0
+}

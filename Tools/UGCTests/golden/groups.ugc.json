@@ -1,0 +1,147 @@
+{
+  "document": {
+    "entities": [
+      {
+        "actorId": "actor_1",
+        "entityId": "ugc-golden-groups-entity-1",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Box",
+        "programId": "actor_prog_1",
+        "properties": [
+          
+        ],
+        "sceneID": 1,
+        "tags": [
+          
+        ],
+        "transform": [
+          100,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actorId": "actor_2",
+        "entityId": "ugc-golden-groups-entity-2",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Box",
+        "programId": "actor_prog_2",
+        "properties": [
+          
+        ],
+        "sceneID": 2,
+        "tags": [
+          
+        ],
+        "transform": [
+          300,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actorId": "actor_3",
+        "entityId": "ugc-golden-groups-entity-3",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Sphere",
+        "programId": "actor_prog_3",
+        "properties": [
+          
+        ],
+        "sceneID": 3,
+        "tags": [
+          
+        ],
+        "transform": [
+          500,
+          200,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actorId": "actor_4",
+        "entityId": "ugc-golden-groups-entity-4",
+        "external": false,
+        "metadata": [
+          
+        ],
+        "prefabName": "Sphere",
+        "programId": "actor_prog_4",
+        "properties": [
+          
+        ],
+        "sceneID": 4,
+        "tags": [
+          
+        ],
+        "transform": [
+          700,
+          200,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "generatedGroups": {
+      "batch_1": [
+        1,
+        2
+      ],
+      "batch_forest_a": [
+        3,
+        4
+      ]
+    },
+    "header": {
+      "contentVersion": "1",
+      "documentId": "ugc-golden-groups",
+      "revision": 10,
+      "schemaVersion": 3
+    },
+    "nextBatchID": 2,
+    "nextSceneID": 5,
+    "programs": [
+      
+    ],
+    "worldSettings": [
+      
+    ]
+  },
+  "editor": {
+    "activeProgramId": "level_main"
+  },
+  "packageVersion": 1,
+  "savedAt": 0
+}
