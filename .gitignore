@@ -27,3 +27,4 @@ DerivedDataCache/
 !docs/knowledge/generated/
 !docs/knowledge/generated/*.md
 !docs/knowledge/generated/*.json
+/Docs/article
