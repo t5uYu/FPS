@@ -110,7 +110,9 @@ Projectile Lua 根据弹级与 ArmorLevel 计算肉伤/甲伤；随后 C++ Attri
 - `UFPSWeaponDataAsset`：基础数值、弹药、表现、动画、Projectile、GAS ability、RecoilProfile、支持配件槽。
 - `UFPSWeaponAttachmentData`：配件 ID、槽位、属性增量、Mesh/Icon、物品表映射。
 - `UFPSRecoilProfile`：Pattern/Spread 参数。
-- `Content/Data/WeaponBallistics.json`：Lua 并行弹道配置。
+- `Content/Data/WeaponBallistics.json`：Lua 并行弹道配置。唯一编解码是 `Util/json.lua`（T17 起不再有 `rapidjson` 引用），
+  结构由 `Content/Script/Gameplay/Weapon/WeaponBallisticsSchema.lua` 校验（字段白名单 + 类型 + 范围 + 点数上限）；
+  该目录经 `DefaultGame.ini` 的 NonUFS staging 随包，否则打包后 `io.open` 读不到、会静默退化成「无 Pattern 偏移」。
 
 ### 武器 Actor
 
@@ -243,6 +245,26 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 - 稳定 ErrorCode：`UGCLog.Codes` 是白名单，未登记的 code 会被写成 `code=unregistered_code` 并把原值放进 fields；`Tools/UGCTests/run_logging.lua` 会扫描 `Content/Script`，出现未登记 code 直接判失败。
 - SessionId 由 `SceneData:Init` 调 `Log.NewSession("scene_init")` 生成，命令/存档/图程序日志都会带上它。
 
+### 实体属性与层级（T8）
+
+- 属性是 Typed Property Bag：`UGCPropertySchema` 定义白名单键与类型（`mass` / `note` / `lit` / `material` / `team` / `link`），
+  键名拼错、类型或范围不符、引用不存在都会在命令层被拒（稳定错误码见 `UGCLog.Codes`），加载路径同样受 schema 约束。
+- 写入口只有命令：`SetProperty` / `RemoveProperty` / `SetParent` / `ClearParent`，全部带反操作，因此 Undo/Redo 与
+  结构化日志天然覆盖；门面 `SceneData:SetProperty/…` 供 UI 与 LLM 工具调用。
+- 层级以 `parentId` 为唯一事实来源，`children` 由 `Document:GetChildren` 推导；防自引用与成环；
+  删除父实体时子节点上移到祖父，撤销删除会把层级挂回去。
+- LLM 侧工具：`set_property` / `get_property` / `set_parent` / `list_children`（`key` 参数即 schema 白名单 enum）。
+
+### UI ViewModel（T10）
+
+- `Content/Script/Gameplay/UGC/UGCViewModel.lua`：把 SceneData 的 `changed` 事件按 kind 映射成刷新通道
+  （wires / inspector / outline / toolbar），界面只订阅自己关心的通道。未登记的 kind 保守刷新全部通道。
+- 视图以弱引用持有；订阅与视图同生命周期，视图被回收后订阅在下次广播时被剪掉（即使 `Destruct` 没被调用也一样）；
+  `Destruct` 负责 Unsubscribe + UnbindView + DetachSceneData。
+- 所有权：`EditorCore:GetViewModel()` 惰性创建并绑定 SceneData，`EditorCore:ReleaseViewModel()` 由
+  `UGCPlayerController:ReceiveEndPlay` 调用。`EditorCore:OnSelectionChanged/OnStateChanged` 是单槽遗留 API，已标 `@deprecated`。
+- Tick 只保留必要的输入采样：`ReceiveTick` 先问 `_bpEditor:NeedsWireRefresh()`，不需要就跳过（连鼠标位置都不采样）。
+
 ## 9. UGC LLM 与函数调用
 
 ### C++ HTTP
@@ -259,6 +281,7 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 - 武器：`spawn_weapon`
 - 规则：`set_rule`、`get_rule`
 - 场景：`place_object`、`move_object`、`delete_object`、`list_objects`
+- 属性与层级（T8）：`set_property`、`get_property`、`set_parent`、`list_children`
 - PCG：`pcg_generate`、`pcg_clear`
 - 生成器：`list_generators`、`delete_batch`、`list_batches`
 - 自动导出：`generate_coverfield`、`generate_room`、`generate_wall`

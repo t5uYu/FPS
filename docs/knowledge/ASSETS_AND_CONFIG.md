@@ -87,6 +87,10 @@ Tag 同时在 C++ Native 注册和 `DefaultGameplayTags.ini` 声明，修改时�
 - Actor program ID：`actor_prog_N`
 - Level program ID：`level_main`
 - Batch ID：`batch_N`
+- Entity ID（T9 决策：保留派生字符串，不改成随机 GUID）：`<documentId>-entity-<sceneID>`，唯一实现是
+  `Document.MakeEntityId`。约束由代码 + 回归钉死：格式非空、≤128、无控制字符；同一文档内不得重复；
+  `nextSceneID` 必须严格大于最大 `sceneID`（否则分配的 sceneID 会复用，派生 entityId 就会撞车）。
+  PCG / 外部导入可以自带 entityId，但同样必须通过上述校验。
 
 
 ### UGC 本地密钥与存储
@@ -131,6 +135,7 @@ Wwise 插件描述为 EnabledByDefault。
 - 使用 Pak + IoStore。
 - Oodle/Kraken 压缩。
 - Stage `Content/Script`。
+- Stage `Content/Data`（NonUFS，T17）：`WeaponBallistics.json` 由 Lua 在运行期用 `io.open` 读取，放进 pak（UFS）读不到。
 - Stage UnLua、LuaProtobuf、LuaSocket 脚本目录。
 - Cook Wwise Tree/Types。
 

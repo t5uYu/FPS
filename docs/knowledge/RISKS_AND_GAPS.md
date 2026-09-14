@@ -47,6 +47,18 @@
   LLM 工具描述里写的「后续调用都会归到此 batch」与实现不一致（合并前的两份实现同样如此）。
   若要让原子写操作自动入组，应在 `ExecuteCommand` 里把 `_activeBatch` 注入 `command.groups`。
 
+## 2026-09-15 T8/T9/T10/T17 的已知边界（本次交付明确不做的事）
+
+- 旧 `scene.json` 兼容层**不携带** `properties` / `parentId`：`SceneData:SerializeToJSON` 的字段集是历史格式（T1/T4 的回归锁定了它）。
+  影响：把新文档导出成旧格式再导回来会丢属性与层级。运行时存档走 `*.ugc.json` 包，不受影响；要保留属性必须走 package 路径。
+- 弹道配置没有热重载：`BP_WeaponBase` 首次访问读一次并缓存（`BallisticsCache`），改 JSON 需要重启 / 重开 PIE。
+- 属性 schema 是白名单式的 6 个键，`UGCPropertySchema.MAX_PROPERTIES = 16` 在只有 6 个键时不可能自然触发 ——
+  它是给后续扩键留的守卫，回归测试通过临时下调上限来覆盖 `property_limit_reached` 分支。
+- `EditorCore:OnSelectionChanged / OnStateChanged` 保留为 `@deprecated` 单槽 API（仓库内已无调用者）：新界面应订阅 ViewModel 通道。
+- UI 的运行时行为（PIE 里连线重绘是否正常、UnLua 是否真的调用 `Destruct`）**未在编辑器内验证** —— 本机 Editor 目标仍被第三方
+  `UnLuaEditor` 链接失败阻塞（见 T19 记录）。纯 Lua 侧可验证的都已验证（`run_viewmodel.lua` 10 项），UE Widget 侧靠源码守卫锁接线。
+- 武器弹道数据仍是两份（`Content/Data/WeaponBallistics.json` 与 `UFPSRecoilProfile` 资产），T17 只收敛了编解码与校验，没有合并数据源。
+
 ## P0/P1：优先确认
 
 ### 1. PlayerState 上的 AttributeSet 死亡状态可能无法跨重生复位

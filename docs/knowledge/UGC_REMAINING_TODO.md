@@ -6,11 +6,11 @@
 
 ## 快速选择建议
 
-- **已完成**：T1（序列化收敛）、T4（Golden 场景回归）、T13（结构化日志）、T14（备份轮转/自动保存/崩溃恢复）、T15（显式迁移链）、T18（死代码清理）、T19（依赖瘦身 + 守卫 + UE 5.4 Shipping 构建验证）
-- **低成本对齐（半天内）**：T2（需编辑器）
-- **产品化主干**：T3、T5、T10、T6
-- **多人方向**（需先定目标）：T7、T12
-- **长尾治理**：T8、T9、T11、T14、T15、T16、T17、T19
+- **已完成**：T1（序列化收敛）、T4（Golden 场景回归）、T8（属性与层级）、T9（entityId 决策）、T10（UI ViewModel 化）、T13（结构化日志）、T14（备份轮转/自动保存/崩溃恢复）、T15（显式迁移链）、T17（编解码统一 + 弹道 schema）、T18（死代码清理）、T19（依赖瘦身 + 守卫 + UE 5.4 Shipping 构建验证）
+- **低成本对齐（半天内）**：T2（需编辑器）、T16（需 UMG 资产改造）
+- **产品化主干**：T3（需 UE 5.4 编辑器 PIE）、T5（Prefab 资产化，T11 前置）
+- **多人方向**（需先定目标）：T6、T7、T12
+- **长尾治理**：T11（拆插件，依赖 T5、T10）
 
 ## 待办清单
 
@@ -62,20 +62,23 @@
   - 保留单写限制：在文档中把该约束写成设计决策，并说明批量场景的替代路径；
   - 改回 Composite：所有写命令可编译成一个 CompositeCommand，失败整体回滚，并补提案级测试。
 
-### T8 实体属性与层级（SetProperty + parent/children + Typed Property Bag）
+### ~~T8 实体属性与层级（SetProperty + parent/children + Typed Property Bag）~~ ✅ 已完成
 - 优先级：P2 ｜ 规模：M ｜ 依赖：无
 - 目标：Document 的 `properties` 目前只被搬运、无命令写入；缺少层级表达。
 - 验收：`SetProperty` 命令（可 Undo/Redo）；`parentId/children` 或等价层级字段；属性带类型校验（数值/字符串/枚举/引用）。
+- 状态：**已完成（2026-09-15）**，验收全部满足；详见「已执行记录」。
 
-### T9 entityId 收敛为 FGuid（或明确保留字符串）
+### ~~T9 entityId 收敛为 FGuid（或明确保留字符串）~~ ✅ 已完成（保留字符串，见记录）
 - 优先级：P2 ｜ 规模：S ｜ 依赖：无
 - 目标：方案要求 `Guid` EntityId；当前为字符串（`docId-entity-N`）。
 - 验收：要么改为 Guid 并保证存档/PCG/网络稳定；要么在文档中记录「字符串 ID 为最终设计」的理由与约束。
+- 状态：**已完成（2026-09-15）**：决定保留派生字符串 ID，并把它的约束用代码 + 测试钉死；详见「已执行记录」。
 
-### T10 UI ViewModel 化 + 事件驱动刷新
+### ~~T10 UI ViewModel 化 + 事件驱动刷新~~ ✅ 已完成
 - 优先级：P1 ｜ 规模：L ｜ 依赖：无
 - 目标：UI 仍由 PlayerController 的 Tick 驱动（`ReceiveTick → UpdateWires`），未引入 ViewModel / Subsystem。
 - 验收：图编辑器与编辑面板改为事件驱动刷新；Tick 只保留必要的输入采样；ViewModel 持弱引用并在 Destruct 解绑。
+- 状态：**已完成（2026-09-15）**，验收全部满足；详见「已执行记录」。
 
 ### T11 拆分 FPSUGCCore / Runtime / Scripting / UI / AI / Developer 插件
 - 优先级：P2 ｜ 规模：XL ｜ 依赖：T5、T10
@@ -110,10 +113,11 @@
 - 目标：Compiler 已返回 `nodeId` / `pin`，但 UI 只展示首条错误。
 - 验收：可滚动错误列表；点击定位到节点与引脚。
 
-### T17 编解码统一到单一实现（含武器弹道 JSON）
+### ~~T17 编解码统一到单一实现（含武器弹道 JSON）~~ ✅ 已完成
 - 优先级：P3 ｜ 规模：M ｜ 依赖：T1
 - 目标：`BP_WeaponBase.lua` 仍用 `rapidjson` 读弹道配置，与 UGC 编解码不一致。
 - 验收：明确「谁负责哪类 JSON」，或统一到单一编解码路径；配置格式有 schema 与校验。
+- 状态：**已完成（2026-09-15）**，验收全部满足；详见「已执行记录」。
 
 ### ~~T18 移除死代码：`EditorCore:SaveSceneJSON / LoadSceneJSON`~~ ✅ 已完成
 - 优先级：P3 ｜ 规模：XS ｜ 依赖：T1
@@ -238,3 +242,62 @@
       插件侧 `Build.cs` 缺 `DeveloperSettings`/`ContentBrowser`，且该插件源码被 gitignore，属本机环境修复）。
       它不是 T19 的验收条件，但是 T3（PIE 验收）的前置条件。
   - 所有探针临时改动已逐字节还原（SHA256 校验通过）。
+- **T17 编解码统一 + 弹道配置 schema（2026-09-15）**
+  - 唯一编解码：`BP_WeaponBase.lua` 的弹道加载从 `require("rapidjson").decode` 改为 `require("Util.json").decode`；
+    `Content/Script` 下已无任何 rapidjson 引用（`run_tests.ps1` 新增「Content/Script 内不得出现 rapidjson，注释行除外」守卫）。
+  - 新增 `Content/Script/Gameplay/Weapon/WeaponBallisticsSchema.lua`：显式 schema——必填 `recoil_pattern`；
+    可选 `random_spread_radius`（0~45）、`pattern_reset_time`（0.01~10）；每个弹道点必须是 2 个有限数值且 |值| ≤ 180；
+    单武器最多 64 点、最多 64 个武器条目；**未登记字段直接拒绝**（键名拼错正是最需要被抓住的情况）。
+  - 打包路径修复：`Content/Data` 之前没有 staging 条目，`io.open` 在打包后读不到弹道配置，
+    会静默退化成「没有 Pattern 偏移」。`Config/DefaultGame.ini` 增加 `+DirectoriesToAlwaysStageAsNonUFS=(Path="Data")`。
+  - 回归：`Tools/UGCTests/run_weapon_ballistics.lua`（5 项）：真实配置必须过校验；10 组坏配置必须被拒
+    （键名拼错 / 缺必填 / 点结构错 / 数值写成字符串 / 越界 / NaN / 点数超限）；rapidjson 清零；staging 条目存在。
+  - 未纳入：弹道配置的运行时热重载（现在首次访问读一次并缓存到 `BallisticsCache`）。
+
+- **T9 entityId 决策 + 约束（2026-09-15）**
+  - 决策：保留派生字符串 `<documentId>-entity-<sceneID>`（`Document.MakeEntityId` 唯一实现），不改为随机 GUID。
+    理由：随机 GUID 会破坏 Golden 存档逐字节可比性（T4），也会让 v1→v2 迁移里「旧记录没有 entityId 时按 sceneID 派生」
+    这条路径失去确定性；而现有 ID 已经确定性，存档 / PCG / 网络侧真正的需求是「稳定 + 不复用」。
+  - 约束（代码 + 测试钉死）：`InsertEntity` 校验格式（非空、≤128、无控制字符）并拒绝重复 entityId；
+    `ValidateSnapshot` 新增 **nextSceneID 必须严格大于最大 sceneID**（sceneID 复用会让派生 entityId 撞车）、
+    以及 self-parent / 悬空 parentId / 环 的校验。
+  - 回归：`Tools/UGCTests/run_entity_id.lua`（6 项）：派生规则、跨快照 / 旧 `scene.json` / 迁移的稳定性、
+    显式 ID（PCG 路径）保留、重复与非法 ID 拒绝、`nextSceneID` 不变量、删除后重新分配不复用旧 ID。
+
+- **T8 实体属性与层级（2026-09-15）**
+  - 新模块 `UGCPropertySchema.lua`：白名单键 + 类型校验（number / string / boolean / enum / reference）：
+    `mass`(0~10000) / `note`(≤128) / `lit` / `material`(5 值枚举) / `team`(3 值枚举) / `link`(sceneID 引用)；
+    `Schema.Coerce` 让 LLM 用字符串传参（`"42"` / `"true"` / `"Metal"`）后仍走同一套校验。
+  - `UGCDocument`：`SetProperty` / `RemoveProperty` / `GetProperty` / `ListProperties`（类型与数量上限在模型层再校验一次，
+    加载路径同样受约束）+ `SetParent` / `ClearParent` / `GetParent` / `GetChildren` / `IsAncestor`
+    （**parentId 是唯一事实来源**，children 由它推导；防自引用与成环）。
+  - 命令层（唯一写入边界）：`SetProperty` / `RemoveProperty` / `SetParent` / `ClearParent` 全部带反操作 → Undo/Redo；
+    失败码稳定且已登记：`unknown_property` / `invalid_property_value` / `property_limit_reached` / `reference_not_found` /
+    `missing_property` / `entity_not_found` / `invalid_parent` / `hierarchy_cycle`。
+  - 删除语义：删除父实体时子节点**上移到祖父**（不留悬空 parentId）；`DeleteEntity` 的反操作带回 `children` 列表，
+    撤销删除会把层级挂回去（只处理仍指向祖父的子节点，不覆盖用户后续的层级调整）。
+  - 门面与 LLM 工具：`SceneData:SetProperty/GetProperty/ListProperties/SetParent/ClearParent/GetParent/GetChildren`；
+    注册表新增 `set_property`(write) / `get_property`(read) / `set_parent`(write) / `list_children`(read)，
+    `key` 参数直接把 schema 白名单暴露成 enum，模型绕不过校验。
+  - Golden：`groups` 场景加入属性与父子关系，样本 `Tools/UGCTests/golden/groups.ugc.json` 同步更新
+    （`properties` 由空数组变对象、新增 `parentId`、revision 10→16）。先在不带 `--update` 的情况下确认 golden 报出
+    6 处结构差异，确认是有意变化后才更新样本。
+  - 回归：`Tools/UGCTests/run_properties.lua`（11 项）。
+
+- **T10 UI ViewModel 化 + 事件驱动刷新（2026-09-15）**
+  - 新模块 `UGCViewModel.lua`：通道化刷新（wires / inspector / outline / toolbar），把 SceneData 的 `changed` 事件
+    按 kind 映射到通道（未登记的 kind 保守刷新全部通道）；订阅回调逐个 pcall，单个界面刷新异常不影响其它界面。
+  - 弱引用与解绑：`BindView` 只存弱引用；订阅若在「有视图」时建立则与该视图同生命周期 —— 视图被回收后
+    `GetView()` 返回 nil，且**即使 Destruct 没被调用**，过期订阅也会在下次广播时被剪掉（用 `collectgarbage` 实测）。
+    `Destruct` 做 Unsubscribe + UnbindView + DetachSceneData。
+  - `UGCSceneData` 补上 `Unsubscribe` / `UnsubscribeAll` / `ListenerCount`（此前 Subscribe 只增不减，
+    界面关闭后监听者会一直留着，被引用的 UObject 无法回收）。
+  - 接线：`EditorCore:GetViewModel()`（惰性创建并 AttachSceneData）/ `ReleaseViewModel()`（PC `ReceiveEndPlay` 调用）；
+    选中变化与状态切换分别标脏 inspector / toolbar；`WBP_UGCEditor` 与 `WBP_UGCBlueprintEditor` 改为在 `Construct`
+    里 BindView + Subscribe、在 `Destruct` 里解绑（这两个界面此前都**没有** Destruct，且用的是 EditorCore 的单槽回调）。
+  - Tick 只保留必要的输入采样：`UGCPlayerController:ReceiveTick` 先问 `_bpEditor:NeedsWireRefresh()`
+    （正在拖连线 / 事件标脏），不需要就跳过，连鼠标位置都不采样；重绘由 ViewModel 的 wires 通道驱动
+    （AI 放置、撤销重做、加载项目都会触发）。
+  - 回归：`Tools/UGCTests/run_viewmodel.lua`（10 项）：通道语义、订阅广播与异常隔离、真实 SceneData 事件→通道、
+    弱引用剪枝、Detach 不影响销毁，以及 4 组接线守卫（UE Widget 不能在纯 Lua 里实例化，
+    「Tick 只在需要时重绘」这一条只能靠源码断言锁住）。

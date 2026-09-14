@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-14T15:33:25.387801+00:00",
-  "git_head": "0fb9a6d0eceb473c699b3efd65c86b65c36c854d",
-  "source_fingerprint": "b60dc00671d5048da80c1f80e858114eb7b7c6b8fd825805873161668296a672",
+  "generated_at": "2026-09-14T16:26:38.308912+00:00",
+  "git_head": "3f23a58880bec5efc7a69c96dfaa0c8f299fb818",
+  "source_fingerprint": "8610fb7a1445477f6f45950a3228d6deb1a9e8d246b20875da27317da5519af0",
   "project": {
     "name": "FPS",
     "engine_association": "5.4",
@@ -113,7 +113,7 @@
       },
       ".idea": {
         "files": 11,
-        "bytes": 30179
+        "bytes": 30457
       },
       ".vs": {
         "files": 1,
@@ -124,8 +124,8 @@
         "bytes": 727255
       },
       "Binaries": {
-        "files": 95,
-        "bytes": 987040120
+        "files": 100,
+        "bytes": 1419080689
       },
       "Build": {
         "files": 2,
@@ -133,11 +133,11 @@
       },
       "Config": {
         "files": 18,
-        "bytes": 36512
+        "bytes": 36789
       },
       "Content": {
-        "files": 3138,
-        "bytes": 4508398295
+        "files": 3141,
+        "bytes": 4508450659
       },
       "DerivedDataCache": {
         "files": 0,
@@ -145,23 +145,23 @@
       },
       "Docs": {
         "files": 185,
-        "bytes": 19063193
+        "bytes": 19076464
       },
       "FPS_WwiseProject": {
         "files": 33,
         "bytes": 558588
       },
       "Intermediate": {
-        "files": 906,
-        "bytes": 16708943968
+        "files": 1023,
+        "bytes": 20393894300
       },
       "Output": {
         "files": 389,
         "bytes": 8453098
       },
       "Plugins": {
-        "files": 28034,
-        "bytes": 8193446745
+        "files": 28371,
+        "bytes": 8800310566
       },
       "Saved": {
         "files": 9954,
@@ -176,30 +176,30 @@
         "bytes": 2815
       },
       "Temp": {
-        "files": 21,
-        "bytes": 586247
+        "files": 29,
+        "bytes": 620135
       },
       "Tools": {
-        "files": 22,
-        "bytes": 142782
+        "files": 26,
+        "bytes": 194925
       }
     },
     "extension_counts": {
-      ".lua": 14982,
+      ".lua": 14989,
       ".uasset": 6526,
       ".uexp": 3330,
-      ".h": 2228,
+      ".h": 2283,
       ".py": 1906,
       ".pyc": 1888,
-      ".rsp": 1602,
+      ".rsp": 1738,
       ".ubulk": 1508,
-      ".cpp": 1408,
+      ".cpp": 1463,
       "<none>": 990,
-      ".exp": 874,
-      ".lib": 857,
-      ".json": 747,
-      ".pdb": 612,
-      ".obj": 534,
+      ".exp": 875,
+      ".lib": 858,
+      ".json": 844,
+      ".obj": 634,
+      ".pdb": 613,
       ".dll": 315,
       ".png": 314,
       ".md": 210,
@@ -212,14 +212,14 @@
       ".cs": 86,
       ".umap": 75,
       ".c": 70,
-      ".txt": 65,
+      ".txt": 69,
       ".runtime-xml": 62,
       ".dmp": 62,
       ".pak": 57,
       ".pyd": 53,
-      ".res": 43,
+      ".res": 44,
+      ".exe": 43,
       ".svg": 43,
-      ".exe": 42,
       ".pyi": 41,
       ".typed": 40,
       ".dylib": 35,
@@ -228,11 +228,11 @@
       ".html": 29,
       ".wwu": 26,
       ".docx": 25,
+      ".bin": 24,
       ".a": 24,
-      ".bin": 23,
+      ".pch": 21,
       ".xml": 19,
       ".modules": 19,
-      ".pch": 16,
       ".csv": 15,
       ".uplugin": 14,
       ".htm": 14,
@@ -243,28 +243,28 @@
       ".bak": 9,
       ".yml": 8,
       ".cache": 8,
-      ".dat": 7,
+      ".dat": 8,
+      ".ps1": 8,
       ".bat": 6,
       ".inl": 6,
       ".hpp": 6,
       ".ufont": 6,
-      ".ps1": 5,
       ".chm": 5,
       ".asp": 5,
       ".pys": 5,
       ".props": 4,
       ".info": 4,
+      ".deps": 4,
+      ".uhtmanifest": 4,
+      ".uhtpath": 4,
+      ".cmd": 4,
       ".cfg": 4,
-      ".deps": 3,
-      ".uhtmanifest": 3,
-      ".uhtpath": 3,
+      ".target": 3,
       ".pth": 3,
-      ".cmd": 3,
       ".bmp": 3,
       ".vbs": 3,
       ".ldb": 3,
       ".bak1": 3,
-      ".target": 2,
       ".mdb": 2,
       ".csproj": 2,
       ".targets": 2,
@@ -6826,260 +6826,314 @@
     {
       "path": "Content/Script/Gameplay/UGC/UGCDocument.lua",
       "module": "Gameplay.UGC.UGCDocument",
-      "lines": 307,
+      "lines": 538,
       "requires": [
-        "Gameplay.UGC.UGCMigrations"
+        "Gameplay.UGC.UGCMigrations",
+        "Gameplay.UGC.UGCPropertySchema"
       ],
       "functions": [
         {
+          "name": "Document.MakeEntityId",
+          "line": 43
+        },
+        {
           "name": "Document.New",
-          "line": 50
+          "line": 78
         },
         {
           "name": "Document:Touch",
-          "line": 69
+          "line": 97
         },
         {
           "name": "Document:AllocateSceneID",
-          "line": 74
+          "line": 102
         },
         {
           "name": "Document:PeekGroupID",
-          "line": 80
-        },
-        {
-          "name": "Document:AllocateGroupID",
-          "line": 84
-        },
-        {
-          "name": "Document:MakeEntityRecord",
-          "line": 90
-        },
-        {
-          "name": "Document:InsertEntity",
           "line": 108
         },
         {
-          "name": "Document:RemoveEntity",
-          "line": 120
+          "name": "Document:AllocateGroupID",
+          "line": 112
         },
         {
-          "name": "Document:GetEntity",
+          "name": "Document:MakeEntityRecord",
+          "line": 118
+        },
+        {
+          "name": "Document:InsertEntity",
           "line": 136
         },
         {
-          "name": "Document:SetTransform",
-          "line": 140
-        },
-        {
-          "name": "Document:Count",
-          "line": 147
-        },
-        {
-          "name": "Document:SetProgram",
-          "line": 153
-        },
-        {
-          "name": "Document:GetProgram",
+          "name": "Document:RemoveEntity",
           "line": 159
         },
         {
+          "name": "Document:GetEntity",
+          "line": 183
+        },
+        {
+          "name": "Document:SetTransform",
+          "line": 187
+        },
+        {
+          "name": "Document:GetProperty",
+          "line": 200
+        },
+        {
+          "name": "Document:CountProperties",
+          "line": 206
+        },
+        {
+          "name": "Document:SetProperty",
+          "line": 216
+        },
+        {
+          "name": "Document:RemoveProperty",
+          "line": 235
+        },
+        {
+          "name": "Document:ListProperties",
+          "line": 245
+        },
+        {
+          "name": "Document:GetParent",
+          "line": 257
+        },
+        {
+          "name": "Document:GetChildren",
+          "line": 265
+        },
+        {
+          "name": "Document:IsAncestor",
+          "line": 275
+        },
+        {
+          "name": "Document:SetParent",
+          "line": 294
+        },
+        {
+          "name": "Document:ClearParent",
+          "line": 312
+        },
+        {
+          "name": "Document:Count",
+          "line": 319
+        },
+        {
+          "name": "Document:SetProgram",
+          "line": 325
+        },
+        {
+          "name": "Document:GetProgram",
+          "line": 331
+        },
+        {
           "name": "Document:RemoveProgram",
-          "line": 163
+          "line": 335
         },
         {
           "name": "Document:CreateGroup",
-          "line": 169
+          "line": 341
         },
         {
           "name": "Document:AddToGroup",
-          "line": 182
+          "line": 354
         },
         {
           "name": "Document:RemoveFromGroup",
-          "line": 192
+          "line": 364
         },
         {
           "name": "Document:RemoveGroup",
-          "line": 204
+          "line": 376
         },
         {
           "name": "Document:Snapshot",
-          "line": 210
+          "line": 382
         },
         {
           "name": "Document.ValidateSnapshot",
-          "line": 227
+          "line": 399
         },
         {
           "name": "Document.FromSnapshot",
-          "line": 270
+          "line": 501
         }
       ]
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCEditorCore.lua",
       "module": "Gameplay.UGC.UGCEditorCore",
-      "lines": 1003,
+      "lines": 1031,
       "requires": [
         "Gameplay.AnimAgent.AnimAgentCore",
         "Gameplay.Core.UIManager",
         "Gameplay.UGC.UGCLog",
         "Gameplay.UGC.UGCPrefabRegistry",
         "Gameplay.UGC.UGCProgramRunner",
-        "Gameplay.UGC.UGCSceneData"
+        "Gameplay.UGC.UGCSceneData",
+        "Gameplay.UGC.UGCViewModel"
       ],
       "functions": [
         {
           "name": "EditorCore:Init",
-          "line": 305
+          "line": 307
         },
         {
           "name": "EditorCore:GetState",
-          "line": 357
+          "line": 359
         },
         {
           "name": "EditorCore:EnterEditMode",
-          "line": 374
+          "line": 376
         },
         {
           "name": "EditorCore:EnterPlayMode",
-          "line": 396
+          "line": 399
         },
         {
           "name": "EditorCore:ToggleEditMode",
-          "line": 435
+          "line": 439
         },
         {
           "name": "EditorCore:OnStateChanged",
-          "line": 445
-        },
-        {
-          "name": "EditorCore:OnSelectionChanged",
           "line": 451
         },
         {
+          "name": "EditorCore:OnSelectionChanged",
+          "line": 456
+        },
+        {
+          "name": "EditorCore:GetViewModel",
+          "line": 466
+        },
+        {
+          "name": "EditorCore:ReleaseViewModel",
+          "line": 474
+        },
+        {
           "name": "EditorCore:SelectPrefab",
-          "line": 460
+          "line": 486
         },
         {
           "name": "EditorCore:_destroyGhost",
-          "line": 495
+          "line": 521
         },
         {
           "name": "EditorCore:UpdateGhostPosition",
-          "line": 505
+          "line": 531
         },
         {
           "name": "EditorCore:CancelPrefab",
-          "line": 526
+          "line": 552
         },
         {
           "name": "EditorCore:GetPendingPrefab",
-          "line": 530
+          "line": 556
         },
         {
           "name": "EditorCore:OnViewportClick",
-          "line": 539
+          "line": 565
         },
         {
           "name": "EditorCore:SelectByID",
-          "line": 629
-        },
-        {
-          "name": "EditorCore:ClearSelection",
           "line": 655
         },
         {
-          "name": "EditorCore:GetSelectedID",
-          "line": 668
-        },
-        {
-          "name": "EditorCore:GetBridge",
-          "line": 672
-        },
-        {
-          "name": "EditorCore:SetSnapEnabled",
-          "line": 680
-        },
-        {
-          "name": "EditorCore:SetSnapSize",
+          "name": "EditorCore:ClearSelection",
           "line": 682
         },
         {
+          "name": "EditorCore:GetSelectedID",
+          "line": 696
+        },
+        {
+          "name": "EditorCore:GetBridge",
+          "line": 700
+        },
+        {
+          "name": "EditorCore:SetSnapEnabled",
+          "line": 708
+        },
+        {
+          "name": "EditorCore:SetSnapSize",
+          "line": 710
+        },
+        {
           "name": "EditorCore:GetSnapEnabled",
-          "line": 683
+          "line": 711
         },
         {
           "name": "EditorCore:GetSnapSize",
-          "line": 684
+          "line": 712
         },
         {
           "name": "EditorCore:GetSelectedEntry",
-          "line": 685
+          "line": 713
         },
         {
           "name": "EditorCore:DeleteSelected",
-          "line": 695
+          "line": 723
         },
         {
           "name": "EditorCore:SetSelectedTransform",
-          "line": 706
+          "line": 734
         },
         {
           "name": "EditorCore:GetSelectedTransformValues",
-          "line": 718
+          "line": 746
         },
         {
           "name": "EditorCore:Undo",
-          "line": 732
+          "line": 760
         },
         {
           "name": "EditorCore:Redo",
-          "line": 738
+          "line": 766
         },
         {
           "name": "EditorCore:ClearScene",
-          "line": 752
+          "line": 780
         },
         {
           "name": "EditorCore:BeginDrag",
-          "line": 763
+          "line": 791
         },
         {
           "name": "EditorCore:OnDragUpdate",
-          "line": 801
+          "line": 829
         },
         {
           "name": "EditorCore:EndDrag",
-          "line": 883
+          "line": 911
         },
         {
           "name": "EditorCore:IsMouseDown",
-          "line": 904
+          "line": 932
         },
         {
           "name": "EditorCore:IsEscapeDown",
-          "line": 910
+          "line": 938
         },
         {
           "name": "EditorCore:UpdateGizmoScale",
-          "line": 917
+          "line": 945
         },
         {
           "name": "EditorCore:_InjectRuntimeAsset",
-          "line": 949
+          "line": 977
         },
         {
           "name": "EditorCore:_InjectDynMesh",
-          "line": 976
+          "line": 1004
         }
       ]
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCFunctionRegistry.lua",
       "module": "Gameplay.UGC.UGCFunctionRegistry",
-      "lines": 792,
+      "lines": 871,
       "requires": [
         "Gameplay.AnimAgent.AnimAssetLibrary",
         "Gameplay.UGC.Generators.Init",
@@ -7088,6 +7142,7 @@
         "Gameplay.UGC.UGCFunctionRegistry",
         "Gameplay.UGC.UGCLog",
         "Gameplay.UGC.UGCPrefabRegistry",
+        "Gameplay.UGC.UGCPropertySchema",
         "Gameplay.UGC.UGCSceneData",
         "Util.json"
       ],
@@ -7106,35 +7161,35 @@
         },
         {
           "name": "Registry:ValidateCall",
-          "line": 637
+          "line": 716
         },
         {
           "name": "Registry:Call",
-          "line": 666
-        },
-        {
-          "name": "Registry:BuildProposal",
-          "line": 683
-        },
-        {
-          "name": "Registry:FormatProposal",
-          "line": 703
-        },
-        {
-          "name": "Registry:ExecuteProposal",
-          "line": 713
-        },
-        {
-          "name": "Registry:GetSchemas",
           "line": 745
         },
         {
+          "name": "Registry:BuildProposal",
+          "line": 762
+        },
+        {
+          "name": "Registry:FormatProposal",
+          "line": 782
+        },
+        {
+          "name": "Registry:ExecuteProposal",
+          "line": 792
+        },
+        {
+          "name": "Registry:GetSchemas",
+          "line": 824
+        },
+        {
           "name": "Registry:Count",
-          "line": 775
+          "line": 854
         },
         {
           "name": "Registry:ListFunctions",
-          "line": 781
+          "line": 860
         }
       ]
     },
@@ -7168,7 +7223,7 @@
     {
       "path": "Content/Script/Gameplay/UGC/UGCLog.lua",
       "module": "Gameplay.UGC.UGCLog",
-      "lines": 307,
+      "lines": 316,
       "requires": [
         "Gameplay.UGC.UGCLog",
         "Util.json"
@@ -7176,83 +7231,83 @@
       "functions": [
         {
           "name": "Log.FormatLine",
-          "line": 137
+          "line": 146
         },
         {
           "name": "Log.ResolveCode",
-          "line": 157
+          "line": 166
         },
         {
           "name": "Log.Emit",
-          "line": 168
+          "line": 177
         },
         {
           "name": "Log.Debug",
-          "line": 191
+          "line": 200
         },
         {
           "name": "Log.Info",
-          "line": 193
+          "line": 202
         },
         {
           "name": "Log.Warn",
-          "line": 194
+          "line": 203
         },
         {
           "name": "Log.Error",
-          "line": 197
+          "line": 206
         },
         {
           "name": "Log.Command",
-          "line": 208
+          "line": 217
         },
         {
           "name": "Log.NewSession",
-          "line": 233
-        },
-        {
-          "name": "Log.GetSession",
-          "line": 238
-        },
-        {
-          "name": "Log.SetContext",
           "line": 242
         },
         {
+          "name": "Log.GetSession",
+          "line": 247
+        },
+        {
+          "name": "Log.SetContext",
+          "line": 251
+        },
+        {
           "name": "Log.GetContext",
-          "line": 248
+          "line": 257
         },
         {
           "name": "Log.ClearContext",
-          "line": 250
+          "line": 259
         },
         {
           "name": "Log.SetSink",
-          "line": 256
+          "line": 265
         },
         {
           "name": "Log.ResetSink",
-          "line": 261
+          "line": 270
         },
         {
           "name": "Log.Subscribe",
-          "line": 267
+          "line": 276
         },
         {
           "name": "Log.History",
-          "line": 275
+          "line": 284
         },
         {
           "name": "Log.Counts",
-          "line": 285
+          "line": 294
         },
         {
           "name": "Log.Sequence",
-          "line": 287
+          "line": 296
         },
         {
           "name": "Log.Reset",
-          "line": 291
+          "line": 300
         }
       ]
     },
@@ -7358,7 +7413,7 @@
     {
       "path": "Content/Script/Gameplay/UGC/UGCPlayerController.lua",
       "module": "Gameplay.UGC.UGCPlayerController",
-      "lines": 225,
+      "lines": 230,
       "requires": [
         "Gameplay.Core.GM",
         "Gameplay.Core.UIManager",
@@ -7382,51 +7437,51 @@
         },
         {
           "name": "M:ToggleEditor",
-          "line": 49
+          "line": 51
         },
         {
           "name": "M:ToggleBlueprintEditor",
-          "line": 55
+          "line": 57
         },
         {
           "name": "M:EditorClick",
-          "line": 72
+          "line": 74
         },
         {
           "name": "M:SetBlueprintEditor",
-          "line": 94
+          "line": 96
         },
         {
           "name": "M:ScheduleCallback",
-          "line": 102
+          "line": 104
         },
         {
           "name": "M:OnLLMResponse",
-          "line": 109
+          "line": 111
         },
         {
           "name": "M:OnLLMError",
-          "line": 113
+          "line": 115
         },
         {
           "name": "M:OnTriggerZoneEnter",
-          "line": 123
+          "line": 125
         },
         {
           "name": "M:OnTriggerZoneExit",
-          "line": 131
+          "line": 133
         },
         {
           "name": "M:ReceiveTick",
-          "line": 143
+          "line": 145
         },
         {
           "name": "M:SendToLLM",
-          "line": 215
+          "line": 220
         },
         {
           "name": "M:GetUGCFunctionList",
-          "line": 220
+          "line": 225
         }
       ]
     },
@@ -7583,245 +7638,408 @@
       ]
     },
     {
+      "path": "Content/Script/Gameplay/UGC/UGCPropertySchema.lua",
+      "module": "Gameplay.UGC.UGCPropertySchema",
+      "lines": 182,
+      "requires": [],
+      "functions": [
+        {
+          "name": "Schema.IsKnown",
+          "line": 62
+        },
+        {
+          "name": "Schema.KeyList",
+          "line": 67
+        },
+        {
+          "name": "Schema.Definition",
+          "line": 73
+        },
+        {
+          "name": "Schema.IsReference",
+          "line": 77
+        },
+        {
+          "name": "Schema.ReferenceKeys",
+          "line": 82
+        },
+        {
+          "name": "Schema.Validate",
+          "line": 94
+        },
+        {
+          "name": "Schema.Coerce",
+          "line": 146
+        }
+      ]
+    },
+    {
       "path": "Content/Script/Gameplay/UGC/UGCSceneData.lua",
       "module": "Gameplay.UGC.UGCSceneData",
-      "lines": 861,
+      "lines": 1089,
       "requires": [
         "Gameplay.UGC.UGCCommandBus",
         "Gameplay.UGC.UGCDocument",
         "Gameplay.UGC.UGCLog",
         "Gameplay.UGC.UGCPrefabRegistry",
+        "Gameplay.UGC.UGCPropertySchema",
         "Gameplay.UGC.UGCWorldProjection",
         "Util.json"
       ],
       "functions": [
         {
           "name": "SceneData:SetActorCreatedHook",
-          "line": 367
-        },
-        {
-          "name": "SceneData:Init",
-          "line": 370
-        },
-        {
-          "name": "SceneData:Shutdown",
-          "line": 383
-        },
-        {
-          "name": "SceneData:GetDocument",
-          "line": 392
-        },
-        {
-          "name": "SceneData:GetCommandBus",
-          "line": 394
-        },
-        {
-          "name": "SceneData:GetRevision",
-          "line": 395
-        },
-        {
-          "name": "SceneData:Subscribe",
-          "line": 396
-        },
-        {
-          "name": "SceneData:RegisterExternalAdapter",
-          "line": 401
-        },
-        {
-          "name": "SceneData:RegisterExternalRestorer",
-          "line": 408
-        },
-        {
-          "name": "SceneData:RegisterWorldRuleAdapter",
-          "line": 412
-        },
-        {
-          "name": "SceneData:SetWorldRule",
-          "line": 418
-        },
-        {
-          "name": "SceneData:GetWorldRule",
-          "line": 422
-        },
-        {
-          "name": "SceneData:AttachExternalActor",
-          "line": 429
-        },
-        {
-          "name": "SceneData:ExecuteCommand",
-          "line": 435
-        },
-        {
-          "name": "SceneData:ExecuteComposite",
-          "line": 447
-        },
-        {
-          "name": "SceneData:Clear",
-          "line": 484
-        },
-        {
-          "name": "SceneData:IsDirty",
-          "line": 495
-        },
-        {
-          "name": "SceneData:MarkDirty",
-          "line": 497
-        },
-        {
-          "name": "SceneData:ClearDirty",
-          "line": 498
-        },
-        {
-          "name": "SceneData:SetScript",
-          "line": 499
-        },
-        {
-          "name": "SceneData:GetScript",
-          "line": 508
-        },
-        {
-          "name": "SceneData:SetLevelScript",
-          "line": 509
-        },
-        {
-          "name": "SceneData:GetLevelScript",
-          "line": 510
-        },
-        {
-          "name": "SceneData:SetActorScript",
-          "line": 511
-        },
-        {
-          "name": "SceneData:GetActorScript",
           "line": 512
         },
         {
-          "name": "SceneData:GetAllScripts",
-          "line": 513
+          "name": "SceneData:Init",
+          "line": 515
         },
         {
-          "name": "SceneData:LoadAllScripts",
-          "line": 514
+          "name": "SceneData:Shutdown",
+          "line": 528
         },
         {
-          "name": "SceneData:CreateActor",
-          "line": 518
+          "name": "SceneData:GetDocument",
+          "line": 537
         },
         {
-          "name": "SceneData:CreateActorWithTransform",
-          "line": 524
+          "name": "SceneData:GetCommandBus",
+          "line": 539
         },
         {
-          "name": "SceneData:CreateExternalEntity",
-          "line": 535
+          "name": "SceneData:GetRevision",
+          "line": 540
         },
         {
-          "name": "SceneData:RegisterExternalActor",
-          "line": 547
+          "name": "SceneData:Subscribe",
+          "line": 541
         },
         {
-          "name": "SceneData:DeleteExternalByKind",
-          "line": 565
+          "name": "SceneData:Unsubscribe",
+          "line": 549
         },
         {
-          "name": "SceneData:UnregisterExternalByKind",
-          "line": 580
+          "name": "SceneData:UnsubscribeAll",
+          "line": 562
         },
         {
-          "name": "SceneData:BeginNamedBatch",
-          "line": 589
+          "name": "SceneData:ListenerCount",
+          "line": 577
         },
         {
-          "name": "SceneData:EndActiveBatch",
+          "name": "SceneData:RegisterExternalAdapter",
+          "line": 583
+        },
+        {
+          "name": "SceneData:RegisterExternalRestorer",
+          "line": 590
+        },
+        {
+          "name": "SceneData:RegisterWorldRuleAdapter",
+          "line": 594
+        },
+        {
+          "name": "SceneData:SetWorldRule",
           "line": 600
         },
         {
-          "name": "SceneData:GetActiveBatch",
-          "line": 608
+          "name": "SceneData:GetWorldRule",
+          "line": 604
         },
         {
-          "name": "SceneData:BeginBatch",
-          "line": 611
+          "name": "SceneData:SetProperty",
+          "line": 616
         },
         {
-          "name": "SceneData:AllocateBatchID",
-          "line": 618
-        },
-        {
-          "name": "SceneData:AddToBatch",
+          "name": "SceneData:RemoveProperty",
           "line": 621
         },
         {
-          "name": "SceneData:GetBatchActors",
-          "line": 625
-        },
-        {
-          "name": "SceneData:DeleteBatch",
+          "name": "SceneData:GetProperty",
           "line": 626
         },
         {
-          "name": "SceneData:ListBatches",
+          "name": "SceneData:ListProperties",
+          "line": 631
+        },
+        {
+          "name": "SceneData:SetParent",
           "line": 636
         },
         {
-          "name": "SceneData:DeleteActor",
-          "line": 643
+          "name": "SceneData:ClearParent",
+          "line": 642
         },
         {
-          "name": "SceneData:ModifyActor",
-          "line": 649
+          "name": "SceneData:GetParent",
+          "line": 647
         },
         {
-          "name": "SceneData:QueryActor",
+          "name": "SceneData:GetChildren",
+          "line": 652
+        },
+        {
+          "name": "SceneData:AttachExternalActor",
           "line": 657
         },
         {
-          "name": "SceneData:Count",
-          "line": 662
-        },
-        {
-          "name": "SceneData:ForEach",
+          "name": "SceneData:ExecuteCommand",
           "line": 663
         },
         {
-          "name": "SceneData:GetAllActors",
-          "line": 670
-        },
-        {
-          "name": "SceneData:PushUndo",
+          "name": "SceneData:ExecuteComposite",
           "line": 675
         },
         {
-          "name": "SceneData:Undo",
-          "line": 708
-        },
-        {
-          "name": "SceneData:Redo",
+          "name": "SceneData:Clear",
           "line": 712
         },
         {
+          "name": "SceneData:IsDirty",
+          "line": 723
+        },
+        {
+          "name": "SceneData:MarkDirty",
+          "line": 725
+        },
+        {
+          "name": "SceneData:ClearDirty",
+          "line": 726
+        },
+        {
+          "name": "SceneData:SetScript",
+          "line": 727
+        },
+        {
+          "name": "SceneData:GetScript",
+          "line": 736
+        },
+        {
+          "name": "SceneData:SetLevelScript",
+          "line": 737
+        },
+        {
+          "name": "SceneData:GetLevelScript",
+          "line": 738
+        },
+        {
+          "name": "SceneData:SetActorScript",
+          "line": 739
+        },
+        {
+          "name": "SceneData:GetActorScript",
+          "line": 740
+        },
+        {
+          "name": "SceneData:GetAllScripts",
+          "line": 741
+        },
+        {
+          "name": "SceneData:LoadAllScripts",
+          "line": 742
+        },
+        {
+          "name": "SceneData:CreateActor",
+          "line": 746
+        },
+        {
+          "name": "SceneData:CreateActorWithTransform",
+          "line": 752
+        },
+        {
+          "name": "SceneData:CreateExternalEntity",
+          "line": 763
+        },
+        {
+          "name": "SceneData:RegisterExternalActor",
+          "line": 775
+        },
+        {
+          "name": "SceneData:DeleteExternalByKind",
+          "line": 793
+        },
+        {
+          "name": "SceneData:UnregisterExternalByKind",
+          "line": 808
+        },
+        {
+          "name": "SceneData:BeginNamedBatch",
+          "line": 817
+        },
+        {
+          "name": "SceneData:EndActiveBatch",
+          "line": 828
+        },
+        {
+          "name": "SceneData:GetActiveBatch",
+          "line": 836
+        },
+        {
+          "name": "SceneData:BeginBatch",
+          "line": 839
+        },
+        {
+          "name": "SceneData:AllocateBatchID",
+          "line": 846
+        },
+        {
+          "name": "SceneData:AddToBatch",
+          "line": 849
+        },
+        {
+          "name": "SceneData:GetBatchActors",
+          "line": 853
+        },
+        {
+          "name": "SceneData:DeleteBatch",
+          "line": 854
+        },
+        {
+          "name": "SceneData:ListBatches",
+          "line": 864
+        },
+        {
+          "name": "SceneData:DeleteActor",
+          "line": 871
+        },
+        {
+          "name": "SceneData:ModifyActor",
+          "line": 877
+        },
+        {
+          "name": "SceneData:QueryActor",
+          "line": 885
+        },
+        {
+          "name": "SceneData:Count",
+          "line": 890
+        },
+        {
+          "name": "SceneData:ForEach",
+          "line": 891
+        },
+        {
+          "name": "SceneData:GetAllActors",
+          "line": 898
+        },
+        {
+          "name": "SceneData:PushUndo",
+          "line": 903
+        },
+        {
+          "name": "SceneData:Undo",
+          "line": 936
+        },
+        {
+          "name": "SceneData:Redo",
+          "line": 940
+        },
+        {
           "name": "SceneData:SerializePackageTable",
-          "line": 715
+          "line": 943
         },
         {
           "name": "SceneData:DeserializePackageTable",
-          "line": 724
+          "line": 952
         },
         {
           "name": "SceneData:SerializeToJSON",
-          "line": 785
+          "line": 1013
         },
         {
           "name": "SceneData:DeserializeFromJSON",
-          "line": 811
+          "line": 1039
         },
         {
           "name": "SceneData:SerializeProgramsJSON",
-          "line": 848
+          "line": 1076
         },
         {
           "name": "SceneData:DeserializeProgramsJSON",
-          "line": 852
+          "line": 1080
+        }
+      ]
+    },
+    {
+      "path": "Content/Script/Gameplay/UGC/UGCViewModel.lua",
+      "module": "Gameplay.UGC.UGCViewModel",
+      "lines": 248,
+      "requires": [
+        "Gameplay.UGC.UGCLog"
+      ],
+      "functions": [
+        {
+          "name": "ViewModel.New",
+          "line": 40
+        },
+        {
+          "name": "ViewModel:BindView",
+          "line": 58
+        },
+        {
+          "name": "ViewModel:GetView",
+          "line": 66
+        },
+        {
+          "name": "ViewModel:UnbindView",
+          "line": 69
+        },
+        {
+          "name": "ViewModel:Subscribe",
+          "line": 80
+        },
+        {
+          "name": "ViewModel:Unsubscribe",
+          "line": 96
+        },
+        {
+          "name": "ViewModel:PruneSubscribers",
+          "line": 110
+        },
+        {
+          "name": "ViewModel:SubscriberCount",
+          "line": 121
+        },
+        {
+          "name": "ViewModel:MarkDirty",
+          "line": 129
+        },
+        {
+          "name": "ViewModel:IsDirty",
+          "line": 157
+        },
+        {
+          "name": "ViewModel:ConsumeDirty",
+          "line": 164
+        },
+        {
+          "name": "ViewModel:ClearDirty",
+          "line": 169
+        },
+        {
+          "name": "ViewModel:DirtyChannels",
+          "line": 178
+        },
+        {
+          "name": "ViewModel:AttachSceneData",
+          "line": 194
+        },
+        {
+          "name": "ViewModel:DetachSceneData",
+          "line": 209
+        },
+        {
+          "name": "ViewModel:ApplySceneEvent",
+          "line": 220
+        },
+        {
+          "name": "ViewModel:Destruct",
+          "line": 232
+        },
+        {
+          "name": "ViewModel:IsDestroyed",
+          "line": 242
         }
       ]
     },
@@ -7920,30 +8138,47 @@
     {
       "path": "Content/Script/Gameplay/Weapon/BP_WeaponBase.lua",
       "module": "Gameplay.Weapon.BP_WeaponBase",
-      "lines": 132,
+      "lines": 144,
       "requires": [
-        "rapidjson"
+        "Gameplay.Weapon.WeaponBallisticsSchema",
+        "Util.json"
       ],
       "functions": [
         {
           "name": "M:GetBallisticsData",
-          "line": 53
+          "line": 65
         },
         {
           "name": "M:ReceiveBeginPlay",
-          "line": 59
-        },
-        {
-          "name": "M:GetFireDirectionWithSpread",
           "line": 71
         },
         {
+          "name": "M:GetFireDirectionWithSpread",
+          "line": 83
+        },
+        {
           "name": "M:OnShotFired",
-          "line": 116
+          "line": 128
         },
         {
           "name": "M:ReceiveTick",
-          "line": 122
+          "line": 134
+        }
+      ]
+    },
+    {
+      "path": "Content/Script/Gameplay/Weapon/WeaponBallisticsSchema.lua",
+      "module": "Gameplay.Weapon.WeaponBallisticsSchema",
+      "lines": 144,
+      "requires": [],
+      "functions": [
+        {
+          "name": "Schema.ValidateEntry",
+          "line": 47
+        },
+        {
+          "name": "Schema.Validate",
+          "line": 115
         }
       ]
     },
@@ -8997,7 +9232,7 @@
     {
       "path": "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua",
       "module": "System.UI.UGC.WBP_UGCBlueprintEditor",
-      "lines": 753,
+      "lines": 797,
       "requires": [
         "Gameplay.Core.UIManager",
         "Gameplay.UGC.UGCGraphCompiler",
@@ -9006,123 +9241,135 @@
       "functions": [
         {
           "name": "M:Construct",
-          "line": 98
+          "line": 103
+        },
+        {
+          "name": "M:BindViewModel",
+          "line": 130
+        },
+        {
+          "name": "M:NeedsWireRefresh",
+          "line": 147
+        },
+        {
+          "name": "M:Destruct",
+          "line": 152
         },
         {
           "name": "M:BuildNodeLib",
-          "line": 122
+          "line": 166
         },
         {
           "name": "M:OnMouseMove",
-          "line": 169
+          "line": 213
         },
         {
           "name": "M:OnDragOver",
-          "line": 181
+          "line": 225
         },
         {
           "name": "M:OnDrop",
-          "line": 194
+          "line": 238
         },
         {
           "name": "M:OnMouseButtonDown",
-          "line": 218
+          "line": 262
         },
         {
           "name": "M:PlaceNode",
-          "line": 234
+          "line": 278
         },
         {
           "name": "M:OpenGraph",
-          "line": 310
+          "line": 354
         },
         {
           "name": "M:GetCurrentGraphData",
-          "line": 402
-        },
-        {
-          "name": "M:LoadGraphData",
-          "line": 422
-        },
-        {
-          "name": "M:GetAllGraphsData",
           "line": 446
         },
         {
+          "name": "M:LoadGraphData",
+          "line": 466
+        },
+        {
+          "name": "M:GetAllGraphsData",
+          "line": 490
+        },
+        {
           "name": "M:SaveCurrentGraphToSceneData",
-          "line": 468
+          "line": 512
         },
         {
           "name": "M:OnPinClicked",
-          "line": 480
+          "line": 524
         },
         {
           "name": "M:UpdateWires",
-          "line": 527
+          "line": 571
         },
         {
           "name": "M:IsDraggingPin",
-          "line": 590
+          "line": 634
         },
         {
           "name": "M:BeginNodeDrag",
-          "line": 598
+          "line": 642
         },
         {
           "name": "M:OnDragTick",
-          "line": 610
+          "line": 654
         },
         {
           "name": "M:EndNodeDrag",
-          "line": 620
+          "line": 664
         },
         {
           "name": "M:IsDraggingNode",
-          "line": 626
+          "line": 670
         },
         {
           "name": "M:MoveNodeTo",
-          "line": 630
+          "line": 674
         },
         {
           "name": "M:OnClickClose",
-          "line": 657
-        },
-        {
-          "name": "M:OnClickCompile",
-          "line": 672
-        },
-        {
-          "name": "M:OnClickSave",
-          "line": 692
-        },
-        {
-          "name": "M:OnClickLoad",
-          "line": 697
-        },
-        {
-          "name": "M:OnClickClear",
           "line": 701
         },
         {
+          "name": "M:OnClickCompile",
+          "line": 716
+        },
+        {
+          "name": "M:OnClickSave",
+          "line": 736
+        },
+        {
+          "name": "M:OnClickLoad",
+          "line": 741
+        },
+        {
+          "name": "M:OnClickClear",
+          "line": 745
+        },
+        {
           "name": "M:SetStatus",
-          "line": 724
+          "line": 768
         },
         {
           "name": "M:ScreenDeltaToCanvas",
-          "line": 731
+          "line": 775
         },
         {
           "name": "M:GetActiveID",
-          "line": 747
+          "line": 791
         },
         {
           "name": "M:GetNodes",
-          "line": 749
+          "line": 793
         },
         {
           "name": "M:GetConnections",
-          "line": 750
+          "line": 794
         }
       ]
     },
@@ -9200,7 +9447,7 @@
     {
       "path": "Content/Script/System/UI/UGC/WBP_UGCEditor.lua",
       "module": "System.UI.UGC.WBP_UGCEditor",
-      "lines": 794,
+      "lines": 826,
       "requires": [
         "Gameplay.AnimAgent.AnimAgentCore",
         "Gameplay.Core.UIManager",
@@ -9211,107 +9458,115 @@
       "functions": [
         {
           "name": "M:Construct",
-          "line": 135
+          "line": 139
+        },
+        {
+          "name": "M:BindViewModel",
+          "line": 200
+        },
+        {
+          "name": "M:Destruct",
+          "line": 225
         },
         {
           "name": "M:RebuildPrefabList",
-          "line": 207
+          "line": 239
         },
         {
           "name": "M:BuildPrefabList",
-          "line": 228
+          "line": 260
         },
         {
           "name": "M:_BuildImportPackageButton",
-          "line": 347
+          "line": 379
         },
         {
           "name": "M:OnClickImportPackage",
-          "line": 363
+          "line": 395
         },
         {
           "name": "M:OnClickPrefab",
-          "line": 394
+          "line": 426
         },
         {
           "name": "M:OnClickPlay",
-          "line": 399
+          "line": 431
         },
         {
           "name": "M:OnClickSave",
-          "line": 422
+          "line": 454
         },
         {
           "name": "M:OnClickLoad",
-          "line": 455
+          "line": 487
         },
         {
           "name": "M:OnClickClear",
-          "line": 502
+          "line": 534
         },
         {
           "name": "M:OnClickDelete",
-          "line": 508
+          "line": 540
         },
         {
           "name": "M:OnClickUndo",
-          "line": 514
+          "line": 546
         },
         {
           "name": "M:OnClickBlueprint",
-          "line": 520
+          "line": 552
         },
         {
           "name": "M:OnClickActorBlueprint",
-          "line": 542
+          "line": 574
         },
         {
           "name": "M:OnClickChat",
-          "line": 572
+          "line": 604
         },
         {
           "name": "M:OnClickFab",
-          "line": 582
+          "line": 614
         },
         {
           "name": "M:RefreshActorBlueprintBtn",
-          "line": 610
+          "line": 642
         },
         {
           "name": "M:OnTransformCommit",
-          "line": 619
+          "line": 651
         },
         {
           "name": "M:RefreshTransformInputs",
-          "line": 639
+          "line": 671
         },
         {
           "name": "M:ClearTransformInputs",
-          "line": 659
-        },
-        {
-          "name": "M:OnViewportMouseDown",
-          "line": 674
-        },
-        {
-          "name": "M:SetStatus",
           "line": 691
         },
         {
-          "name": "M:ShowLoading",
-          "line": 709
+          "name": "M:OnViewportMouseDown",
+          "line": 706
         },
         {
-          "name": "M:HideLoading",
+          "name": "M:SetStatus",
           "line": 723
         },
         {
+          "name": "M:ShowLoading",
+          "line": 741
+        },
+        {
+          "name": "M:HideLoading",
+          "line": 755
+        },
+        {
           "name": "M:BuildSnapUI",
-          "line": 734
+          "line": 766
         },
         {
           "name": "M:RefreshPlayButton",
-          "line": 779
+          "line": 811
         }
       ]
     },
@@ -9608,19 +9863,19 @@
       "path": "Content/Script/Gameplay/UGC/UGCDocument.lua",
       "name": "UGCDocument",
       "kind": "lua",
-      "bytes": 10525
+      "bytes": 20447
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCEditorCore.lua",
       "name": "UGCEditorCore",
       "kind": "lua",
-      "bytes": 38386
+      "bytes": 39927
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCFunctionRegistry.lua",
       "name": "UGCFunctionRegistry",
       "kind": "lua",
-      "bytes": 36941
+      "bytes": 41486
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCGraphCompiler.lua",
@@ -9638,7 +9893,7 @@
       "path": "Content/Script/Gameplay/UGC/UGCLog.lua",
       "name": "UGCLog",
       "kind": "lua",
-      "bytes": 12022
+      "bytes": 12569
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCMigrations.lua",
@@ -9662,7 +9917,7 @@
       "path": "Content/Script/Gameplay/UGC/UGCPlayerController.lua",
       "name": "UGCPlayerController",
       "kind": "lua",
-      "bytes": 7795
+      "bytes": 8308
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCPrefabRegistry.lua",
@@ -9677,10 +9932,22 @@
       "bytes": 10506
     },
     {
+      "path": "Content/Script/Gameplay/UGC/UGCPropertySchema.lua",
+      "name": "UGCPropertySchema",
+      "kind": "lua",
+      "bytes": 6415
+    },
+    {
       "path": "Content/Script/Gameplay/UGC/UGCSceneData.lua",
       "name": "UGCSceneData",
       "kind": "lua",
-      "bytes": 37442
+      "bytes": 48348
+    },
+    {
+      "path": "Content/Script/Gameplay/UGC/UGCViewModel.lua",
+      "name": "UGCViewModel",
+      "kind": "lua",
+      "bytes": 8420
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCWorldProjection.lua",
@@ -9698,7 +9965,13 @@
       "path": "Content/Script/Gameplay/Weapon/BP_WeaponBase.lua",
       "name": "BP_WeaponBase",
       "kind": "blueprint",
-      "bytes": 4894
+      "bytes": 5784
+    },
+    {
+      "path": "Content/Script/Gameplay/Weapon/WeaponBallisticsSchema.lua",
+      "name": "WeaponBallisticsSchema",
+      "kind": "lua",
+      "bytes": 5441
     },
     {
       "path": "Content/Script/System/UI/Fab/WBP_FabLogin.lua",
@@ -9800,7 +10073,7 @@
       "path": "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua",
       "name": "WBP_UGCBlueprintEditor",
       "kind": "widget",
-      "bytes": 27513
+      "bytes": 29287
     },
     {
       "path": "Content/Script/System/UI/UGC/WBP_UGCChat.lua",
@@ -9818,7 +10091,7 @@
       "path": "Content/Script/System/UI/UGC/WBP_UGCEditor.lua",
       "name": "WBP_UGCEditor",
       "kind": "widget",
-      "bytes": 29016
+      "bytes": 30466
     },
     {
       "path": "Content/Script/System/UI/UGC/WBP_UGCNode.lua",
@@ -11478,7 +11751,7 @@
       "candidate": "Content/WwiseAudio.uasset",
       "references": [
         "Config/DefaultGame.ini:106",
-        "Config/DefaultGame.ini:143"
+        "Config/DefaultGame.ini:146"
       ]
     },
     {
@@ -11486,7 +11759,7 @@
       "exists": true,
       "candidate": "Content/WwiseAudio/DefaultGeometrySurfacePropertiesTable.uasset",
       "references": [
-        "Config/DefaultGame.ini:127"
+        "Config/DefaultGame.ini:130"
       ]
     },
     {
@@ -11494,7 +11767,7 @@
       "exists": true,
       "candidate": "Content/WwiseAudio/DefaultReverbAssignmentTable.uasset",
       "references": [
-        "Config/DefaultGame.ini:131"
+        "Config/DefaultGame.ini:134"
       ]
     },
     {
@@ -11502,7 +11775,7 @@
       "exists": true,
       "candidate": "Content/WwiseAudio/WwiseMultiReferenceAssetLibrary.uasset",
       "references": [
-        "Config/DefaultGame.ini:160"
+        "Config/DefaultGame.ini:163"
       ]
     },
     {
@@ -11707,7 +11980,7 @@
       "exists": true,
       "candidate": "Content/_UGC/Editor/Actor/BP_GizmoArrow_X.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:65"
+        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:67"
       ]
     },
     {
@@ -11715,7 +11988,7 @@
       "exists": true,
       "candidate": "Content/_UGC/Editor/Actor/BP_GizmoArrow_Y.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:66"
+        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:68"
       ]
     },
     {
@@ -11723,7 +11996,7 @@
       "exists": true,
       "candidate": "Content/_UGC/Editor/Actor/BP_GizmoArrow_Z.uasset",
       "references": [
-        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:67"
+        "Content/Script/Gameplay/UGC/UGCEditorCore.lua:69"
       ]
     },
     {
@@ -11774,7 +12047,7 @@
       "references": [
         "Content/Script/System/UI/Fab/WBP_FabLogin.lua:268",
         "Content/Script/System/UI/Fab/WBP_FabLogin.lua:271",
-        "Content/Script/System/UI/UGC/WBP_UGCEditor.lua:590"
+        "Content/Script/System/UI/UGC/WBP_UGCEditor.lua:622"
       ]
     },
     {
@@ -11814,7 +12087,7 @@
       "exists": true,
       "candidate": "Content/_UGC/UI/WBP_UGCNode.uasset",
       "references": [
-        "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua:55",
+        "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua:60",
         "Content/Script/System/UI/UGC/WBP_UGCNodeLibBtn.lua:10"
       ]
     },
@@ -11823,7 +12096,7 @@
       "exists": true,
       "candidate": "Content/_UGC/UI/WBP_UGCNodeLibBtn.uasset",
       "references": [
-        "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua:56"
+        "Content/Script/System/UI/UGC/WBP_UGCBlueprintEditor.lua:61"
       ]
     },
     {
@@ -11839,7 +12112,7 @@
       "exists": true,
       "candidate": "Content/_UGC/UI/WBP_UGCPrefabBtn.uasset",
       "references": [
-        "Content/Script/System/UI/UGC/WBP_UGCEditor.lua:216"
+        "Content/Script/System/UI/UGC/WBP_UGCEditor.lua:248"
       ]
     }
   ],
@@ -11896,7 +12169,7 @@
     },
     {
       "path": "Config/DefaultGame.ini",
-      "line": 116,
+      "line": 119,
       "text": "WwiseProjectPath=(FilePath=\"FPS_WwiseProject/FPS_WwiseProject.wproj\")"
     },
     {
@@ -12243,13 +12516,18 @@
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCFunctionRegistry.lua",
-      "line": 431,
+      "line": 510,
       "text": "desc = \"列出所有可用的批量场景生成器（CoverField/Room/Wall 等），返回名字+一句中文描述+必填参数。在调用 generate_xxx 之前先用此函数了解能力。\","
     },
     {
       "path": "Content/Script/Gameplay/UGC/UGCFunctionRegistry.lua",
-      "line": 453,
+      "line": 532,
       "text": "{ name=\"batch_id\", type=\"string\", desc=\"generate_xxx 返回结果中的 batch_id\", required=true },"
+    },
+    {
+      "path": "Content/Script/Gameplay/UGC/UGCPropertySchema.lua",
+      "line": 141,
+      "text": "return false, string.format(\"属性 %s 的类型 %s 未实现\", key, tostring(def.type))"
     },
     {
       "path": "Content/Script/Gameplay/Weapon/BP_FPSProjectile.lua",
