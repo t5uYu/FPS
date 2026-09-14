@@ -12,8 +12,13 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+// Native file dialogs are DesktopPlatform (editor-only dependency, see FPS.Build.cs
+// Target.bBuildEditor). Keep both the include and the call sites inside WITH_EDITOR so
+// Shipping/Game targets still compile; the runtime paths below degrade to "no dialog".
+#if WITH_EDITOR
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#endif
 #include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAnimGenClient, Log, All);
@@ -41,6 +46,8 @@ FString UAnimGenClient::GetUGCPackagesRootDir()
 
 namespace
 {
+#if WITH_EDITOR
+    // 仅编辑器构建有原生窗口句柄可用（Shipping 不存在文件对话框调用点）。
     void* GetParentWindowHandle()
     {
         if (FSlateApplication::IsInitialized())
@@ -53,6 +60,7 @@ namespace
         }
         return nullptr;
     }
+#endif
 }
 
 FString UAnimGenClient::ImportLocalUGCPackage(const FString& SourceFilePath, const FString& DesiredName, const FString& Provider)
@@ -165,6 +173,7 @@ TArray<FString> UAnimGenClient::OpenFileDialog(
     bool bAllowMulti)
 {
     TArray<FString> OutFiles;
+#if WITH_EDITOR
     IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
     if (!Desktop) return OutFiles;
 
@@ -180,6 +189,9 @@ TArray<FString> UAnimGenClient::OpenFileDialog(
         FileTypes,
         Flags,
         OutFiles);
+#else
+    UE_LOG(LogAnimGenClient, Warning, TEXT("OpenFileDialog is editor-only; use ImportLocalGLB with an explicit path"));
+#endif
 
     return OutFiles;
 }
@@ -190,6 +202,7 @@ FString UAnimGenClient::SaveFileDialog(
     const FString& DefaultFileName,
     const FString& FileTypes)
 {
+#if WITH_EDITOR
     IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
     if (!Desktop) return FString();
 
@@ -206,6 +219,10 @@ FString UAnimGenClient::SaveFileDialog(
         return FString();
     }
     return OutFiles.Num() > 0 ? OutFiles[0] : FString();
+#else
+    UE_LOG(LogAnimGenClient, Warning, TEXT("SaveFileDialog is editor-only; use ExportLocalGLB with an explicit path"));
+    return FString();
+#endif
 }
 
 FString UAnimGenClient::ImportLocalGLB(const FString& SourceFilePath, const FString& DesiredName)

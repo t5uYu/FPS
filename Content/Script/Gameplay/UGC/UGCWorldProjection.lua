@@ -10,8 +10,8 @@ local PrefabRegistry = require("Gameplay.UGC.UGCPrefabRegistry")
 local Projection = {}
 Projection.__index = Projection
 
-function Projection.New(bridge)
-    return setmetatable({ bridge = bridge, actors = {} }, Projection)
+function Projection.New(bridge, onSpawn)
+    return setmetatable({ bridge = bridge, actors = {}, onSpawn = onSpawn }, Projection)
 end
 
 function Projection.ToData(transform)
@@ -35,6 +35,11 @@ function Projection:_applyOptionalHooks(record, actor)
     pcall(function() actor:SetDebugVisible(true) end)
 end
 
+--- spawn/attach 后回调（SceneData 的 SetActorCreatedHook）：runtime 资产靠它注入 mesh。
+function Projection:_notifySpawned(record, actor)
+    if self.onSpawn and actor then self.onSpawn(actor, record.prefabName) end
+end
+
 function Projection:Spawn(record)
     if not self.bridge then return nil, "EditorBridge 未初始化" end
     local path = PrefabRegistry.GetPath(record.prefabName)
@@ -49,6 +54,7 @@ function Projection:Spawn(record)
     end
     self.actors[record.sceneID] = actor
     self:_applyOptionalHooks(record, actor)
+    self:_notifySpawned(record, actor)
     return actor
 end
 
@@ -56,6 +62,7 @@ function Projection:AttachExternal(record, actor)
     if not record or not actor then return false end
     self.actors[record.sceneID] = actor
     self:_applyOptionalHooks(record, actor)
+    self:_notifySpawned(record, actor)
     return true
 end
 

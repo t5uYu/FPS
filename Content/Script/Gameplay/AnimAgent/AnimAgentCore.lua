@@ -47,7 +47,7 @@ local function _readManifest(manifestPath)
     if not f then return nil end
     local content = f:read("*a")
     f:close()
-    local ok, json = pcall(require, "Gameplay.UGC.json")
+    local ok, json = pcall(require, "Util.json")
     if not ok or not json then return nil end
     local okDecode, manifest = pcall(function() return json.decode(content) end)
     return okDecode and manifest or nil

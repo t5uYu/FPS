@@ -331,7 +331,7 @@ function EditorCore:Init(playerController)
         end
     end)
 
-    print("[UGCEditorCore] 初始化完成")
+    Log.Info("editor_core_initialized")
 end
 
 --- 内部：确保 _bridge 有效；若为 nil 则尝试从 _pc 懒初始化，仍失败返回 false
@@ -953,7 +953,7 @@ function EditorCore:_InjectRuntimeAsset(actor, prefabName)
 
     local importBridge = _getImportBridge()
     if not importBridge then
-        print("[UGCEditorCore] _InjectRuntimeAsset: 未找到 UAnimImportBridge")
+        Log.Warn("anim_bridge_unavailable", { context = "_InjectRuntimeAsset" })
         return
     end
 
@@ -965,7 +965,7 @@ function EditorCore:_InjectRuntimeAsset(actor, prefabName)
         pcall(function() mesh = importBridge:FindCachedMesh(packageID) end)
     end
     if not mesh then
-        print("[UGCEditorCore] _InjectRuntimeAsset: asset 加载失败 package=" .. tostring(packageID))
+        Log.Warn("runtime_asset_load_failed", { context = "_InjectRuntimeAsset", package = tostring(packageID) })
         return
     end
 
@@ -980,7 +980,7 @@ function EditorCore:_InjectDynMesh(actor, prefabName)
 
     local importBridge = _getImportBridge()
     if not importBridge then
-        print("[UGCEditorCore] _InjectDynMesh: 未找到 UAnimImportBridge")
+        Log.Warn("anim_bridge_unavailable", { context = "_InjectDynMesh" })
         return
     end
 
@@ -992,7 +992,7 @@ function EditorCore:_InjectDynMesh(actor, prefabName)
         pcall(function() mesh = importBridge:FindCachedMesh(dyn.uuid) end)
     end
     if not mesh then
-        print("[UGCEditorCore] _InjectDynMesh: mesh 加载失败 uuid=" .. tostring(dyn.uuid))
+        Log.Warn("dynamic_mesh_load_failed", { context = "_InjectDynMesh", uuid = tostring(dyn.uuid) })
         return
     end
 

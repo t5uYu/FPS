@@ -247,7 +247,7 @@ function Registry:RemovePrefab(id)
             return true
         end
     end
-    print("[UGCPrefabRegistry] 不可删除（非自定义）: " .. id)
+    UGCLog.Warn("prefab_not_removable", { prefab = tostring(id) })
     return false
 end
 
@@ -260,7 +260,7 @@ end
 --- @return string id（"pkg:{package_id}:{asset_id}"）或 nil
 function Registry:RegisterRuntimeAsset(def)
     if not def or not def.package_id or not def.manifest_path then
-        print("[UGCPrefabRegistry] RegisterRuntimeAsset 失败：缺少 package_id 或 manifest_path")
+        UGCLog.Warn("prefab_register_failed", { context = "RegisterRuntimeAsset", reason = "missing package_id or manifest_path" })
         return nil
     end
 
@@ -308,7 +308,7 @@ end
 --- @return string id（"dyn:{uuid}"）或 nil
 function Registry:RegisterDynamicGLB(def)
     if not def or not def.uuid or not def.glb_path then
-        print("[UGCPrefabRegistry] RegisterDynamicGLB 失败：缺少 uuid 或 glb_path")
+        UGCLog.Warn("prefab_register_failed", { context = "RegisterDynamicGLB", reason = "missing uuid or glb_path" })
         return nil
     end
 
