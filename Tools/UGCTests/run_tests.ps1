@@ -137,4 +137,6 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $TestData = Join-Path $Root "Temp\UGCTestData"
 New-Item -ItemType Directory -Force -Path $TestData | Out-Null
 & $LuaExe (Join-Path $PSScriptRoot "run_persistence.lua") $RootLua ($TestData -replace '\\','/')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $LuaExe (Join-Path $PSScriptRoot "run_migration.lua") $RootLua ($TestData -replace '\\','/')
 exit $LASTEXITCODE

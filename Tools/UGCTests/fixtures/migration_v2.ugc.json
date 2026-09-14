@@ -1,0 +1,82 @@
+{
+  "document": {
+    "entities": [
+      {
+        "sceneID": 1,
+        "entityId": "ugc-legacy-v2-entity-1",
+        "actorId": "actor_1",
+        "programId": "actor_prog_1",
+        "prefabName": "Box",
+        "transform": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "sceneID": 2,
+        "entityId": "ugc-legacy-v2-entity-2",
+        "prefabName": "PCG_Generated",
+        "transform": [
+          1200,
+          -350,
+          25,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "external": 1,
+        "metadata": {
+          "kind": "pcg",
+          "seed": 7
+        }
+      },
+      {
+        "sceneID": 3,
+        "prefabName": "Sphere",
+        "transform": [
+          300,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "generatedGroups": {
+      "batch_1": [
+        1,
+        "2",
+        99
+      ]
+    },
+    "header": {
+      "documentId": "ugc-legacy-v2",
+      "revision": 12,
+      "schemaVersion": 2
+    },
+    "nextBatchID": 2,
+    "nextSceneID": 4,
+    "programs": [],
+    "worldSettings": {
+      "GravityScale": "1.5",
+      "Broken": "high"
+    }
+  },
+  "editor": [],
+  "packageVersion": 1,
+  "savedAt": 0
+}

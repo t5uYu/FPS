@@ -6,10 +6,12 @@
     are handled by separate services.
 ]]
 
+local Migrations = require("Gameplay.UGC.UGCMigrations")
+
 local Document = {}
 Document.__index = Document
 
-local CURRENT_SCHEMA_VERSION = 3
+local CURRENT_SCHEMA_VERSION = Migrations.CURRENT
 
 local function deepCopy(value, seen)
     if type(value) ~= "table" then return value end
@@ -268,6 +270,14 @@ end
 
 function Document.FromSnapshot(snapshot)
     snapshot = snapshot or {}
+    -- T15：任何入口（新包 / 旧包 / 旧 scene.json 兼容层）都先过显式迁移链，
+    -- 迁移失败时直接拒绝，不做半套加载。
+    local migrated, report = Migrations.Migrate(snapshot)
+    if not migrated then
+        return nil, "迁移失败: " .. tostring(report)
+    end
+    snapshot = migrated
+
     local valid, validationError = Document.ValidateSnapshot(snapshot)
     if not valid then return nil, validationError end
     local header = snapshot.header or {}

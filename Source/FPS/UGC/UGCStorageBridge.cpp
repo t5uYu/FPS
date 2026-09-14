@@ -19,9 +19,21 @@ bool UUGCStorageBridge::IsAllowedJsonPath(const FString& Path, FString& OutAbsol
     FString SavedDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
     FPaths::NormalizeDirectoryName(SavedDirectory);
     SavedDirectory += TEXT("/");
-    return !OutAbsolutePath.IsEmpty()
-        && OutAbsolutePath.EndsWith(TEXT(".json"), ESearchCase::IgnoreCase)
-        && OutAbsolutePath.StartsWith(SavedDirectory, ESearchCase::IgnoreCase);
+    if (OutAbsolutePath.IsEmpty() || !OutAbsolutePath.StartsWith(SavedDirectory, ESearchCase::IgnoreCase))
+    {
+        return false;
+    }
+
+    // 允许的后缀：存档本体 <.json>，以及备份轮转用的一代/多代备份 <.bak> / <.bakN>。
+    // 放宽到备份后缀是 T14 的需要：备份轮转由 Lua 侧用「读+原子写」完成，
+    // 因此备份文件必须能通过这同一个边界写入；其余目录/后缀依旧被拒绝。
+    if (OutAbsolutePath.EndsWith(TEXT(".json"), ESearchCase::IgnoreCase)) return true;
+    if (OutAbsolutePath.EndsWith(TEXT(".bak"), ESearchCase::IgnoreCase)) return true;
+    FString Suffix;
+    OutAbsolutePath.Split(TEXT("."), nullptr, &Suffix, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    if (!Suffix.StartsWith(TEXT("bak"), ESearchCase::IgnoreCase)) return false;
+    const FString Index = Suffix.RightChop(3);
+    return !Index.IsEmpty() && Index.IsNumeric();
 }
 
 bool UUGCStorageBridge::FileExists(const FString& Path) const

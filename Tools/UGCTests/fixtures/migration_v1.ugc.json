@@ -1,0 +1,60 @@
+{
+  "document": {
+    "entities": [
+      {
+        "id": 1,
+        "prefab": "Box",
+        "t": [
+          100,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "sceneID": 2,
+        "prefabName": "PCG_Generated",
+        "t": [
+          200,
+          0,
+          0,
+          0,
+          45,
+          0,
+          1,
+          1,
+          1
+        ],
+        "external": true,
+        "metadata": {
+          "kind": "pcg",
+          "seed": 42
+        }
+      }
+    ],
+    "header": {
+      "documentId": "ugc-legacy-v1",
+      "revision": 7,
+      "schemaVersion": 1
+    },
+    "programs": {
+      "level_main": {
+        "nodes": [
+          {
+            "id": "root"
+          }
+        ]
+      }
+    }
+  },
+  "editor": {
+    "activeProgramId": "level_main"
+  },
+  "packageVersion": 1,
+  "savedAt": 0
+}

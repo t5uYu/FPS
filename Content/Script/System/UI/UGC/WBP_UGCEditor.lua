@@ -410,6 +410,16 @@ function M:OnClickPlay()
     end
 end
 
+--- T14 自动保存需要随时取到 editorState：每次调用都重新解析蓝图编辑器窗口，
+--- 避免把 Widget 实例长期缓存在持久服务里。
+local function editorStateProvider()
+    local ok, UIManager = pcall(require, "Gameplay.Core.UIManager")
+    local bpInst = ok and UIManager and UIManager:GetWindow("WBP_UGCBlueprintEditor") or nil
+    return {
+        activeProgramId = bpInst and bpInst.GetActiveID and bpInst:GetActiveID() or "level_main",
+    }
+end
+
 function M:OnClickSave()
     local bridge = EditorCore:GetBridge()
     if not bridge then self:SetStatus("保存失败：EditorBridge 不可用"); return end
@@ -433,6 +443,8 @@ function M:OnClickSave()
         activeProgramId = bpInst and bpInst.GetActiveID and bpInst:GetActiveID() or "level_main",
     })
     if ok then
+        -- 绑定项目后自动保存才有目标路径（T14）；editorState 走惰性 provider，不缓存 Widget
+        Persistence:AttachProject(result, SceneData, editorStateProvider)
         self:SetStatus("UGC 项目已原子保存 → " .. tostring(result))
         Log("保存成功: " .. tostring(result))
     else
@@ -459,7 +471,7 @@ function M:OnClickLoad()
     self:ClearTransformInputs()
 
     local SceneData = require("Gameplay.UGC.UGCSceneData")
-    local ok, result = Persistence:LoadProject(path, SceneData)
+    local ok, result, loadInfo = Persistence:LoadProject(path, SceneData)
     if not ok then
         self:HideLoading()
         self:SetStatus("加载失败: " .. tostring(result))
@@ -467,7 +479,15 @@ function M:OnClickLoad()
         return
     end
 
+    -- 绑定项目（T14）：此后 Tick 驱动的自动保存会写回同一路径
+    Persistence:AttachProject(result, SceneData, editorStateProvider)
+
     local doneMsg = "UGC 项目已加载 ← " .. tostring(result)
+    if loadInfo and loadInfo.recovered then
+        -- 崩溃恢复：主文件不可用，已回退到备份世代，必须让玩家看见这件事
+        doneMsg = doneMsg .. "（主文件不可用，已从备份恢复: " .. tostring(loadInfo.from) .. "）"
+        Warn("已从备份恢复: " .. tostring(loadInfo.from))
+    end
     local pc = self:GetOwningPlayer()
     if pc and pc.ScheduleCallback then
         pc:ScheduleCallback(function()

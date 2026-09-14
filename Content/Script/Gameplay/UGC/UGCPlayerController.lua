@@ -154,6 +154,9 @@ function M:ReceiveTick(deltaTime)
     -- ProgramRunner 定时器（Event_OnInterval）
     ProgramRunner:Tick(deltaTime)
 
+    -- 自动保存调度（T14）：绑定过项目后按 interval / minInterval 节流写盘，未绑定时直接返回
+    Persistence:Tick(deltaTime)
+
     -- 蓝图编辑器：连线更新（节点拖拽已改为节点 Widget 自管理，Tick 只负责刷新连线）
     if _bpEditor then
         local ok, x, y = self:GetMousePosition()
