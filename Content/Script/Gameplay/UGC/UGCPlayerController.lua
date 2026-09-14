@@ -14,6 +14,7 @@ local LLMGateway     = require("Gameplay.UGC.LLMGateway")
 local EditorCore     = require("Gameplay.UGC.UGCEditorCore")
 local ProgramRunner  = require("Gameplay.UGC.UGCProgramRunner")
 local Persistence    = require("Gameplay.UGC.UGCPersistence")
+local UGCLog        = require("Gameplay.UGC.UGCLog")
 
 local M = UnLua.Class("Gameplay.PlayerController")
 local Base = require("Gameplay.PlayerController")
@@ -32,8 +33,7 @@ function M:ReceiveBeginPlay()
     UGCRegistry:Init(self)
     ProgramRunner:Init(self)
     LLMGateway:Init(self)
-
-    print("[UGCPlayerController] UGC 层初始化完成")
+    UGCLog.Info("ugc_layer_initialized")
 end
 
 -- F9 切换关卡编辑器
@@ -120,7 +120,7 @@ end
 function M:OnTriggerZoneEnter(programID)
     if EditorCore:GetState() ~= "Play" then return end
     local id = tostring(programID)
-    print("[UGCPlayerController] TriggerZone Enter: " .. id)
+    UGCLog.Info("trigger_enter", { program = id })
     ProgramRunner:RunProgram(id, "Event_OnEnter")
 end
 
@@ -128,7 +128,7 @@ end
 function M:OnTriggerZoneExit(programID)
     if EditorCore:GetState() ~= "Play" then return end
     local id = tostring(programID)
-    print("[UGCPlayerController] TriggerZone Exit: " .. id)
+    UGCLog.Info("trigger_exit", { program = id })
     ProgramRunner:RunProgram(id, "Event_OnExit")
 end
 

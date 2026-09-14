@@ -38,6 +38,7 @@ FPS 是一个 Unreal Engine 5.4 多人 FPS/撤离与 UGC 原型。当前代码�
 - `Content/Script/Gameplay/`：普通与菜单 PlayerController。
 - `Content/Script/System/UI/`：HUD、菜单、库存、UGC Widget 行为。
 - `Content/Script/Gameplay/UGC/`：编辑状态机、场景数据、预制体、LLM、节点程序、生成器。
+- `Content/Script/Gameplay/UGC/UGCLog.lua`：UGC 唯一日志出口（结构化单行 + 稳定 ErrorCode，经 `UUGCLog` 落到独立分类 `LogFPSUGC`）。
 
 ### 数据
 
@@ -45,6 +46,7 @@ FPS 是一个 Unreal Engine 5.4 多人 FPS/撤离与 UGC 原型。当前代码�
 - `SourceData/Items.csv` -> `Tools/DataTableConverter/converter.py` -> `Output/CSV/DT_ItemDefinition.csv`：策划数据流水线。
 - `Content/_FPS/Data/Maps/DT_MapList.uasset`：Lua 地图选择页读取的数据表。
 - `Content/Data/WeaponBallistics.json`：旧/并行 Lua 武器弹道配置。
+- `Content/Script/Util/json.lua`：UGC 文档持久化的唯一 JSON 编解码实现；读写 `*.ugc.json` 与旧 `scene.json + programs.json`，不要再新增第二个 JSON 模块。
 - `Content/Script/Gameplay/UGC/UGCPlaceableConfig.lua`：当前打包运行时的审核 Prefab Catalog；`placeable_manifest.json` 暂保留为资产侧元数据候选。
 - `Saved/UGC/`：运行时场景、程序、编辑器状态、聊天历史；被 Git 忽略。
 

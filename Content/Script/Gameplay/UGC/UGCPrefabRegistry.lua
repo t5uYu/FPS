@@ -9,6 +9,7 @@
 
 -- JSON 工具：使用统一的 json.lua 模块
 local PackagedCatalog = require("Gameplay.UGC.UGCPlaceableConfig")
+local UGCLog = require("Gameplay.UGC.UGCLog")
 
 local Registry = {}
 
@@ -139,7 +140,7 @@ function Registry:LoadDynamic(bridge)
                 end
             end
         end
-        print(string.format("[UGCPrefabRegistry] 扫描到 %d 个预制体", #entries))
+        UGCLog.Info("prefab_scan", { discovered = #entries })
     end
 
     -- Player-supplied Blueprint paths remain disabled until a dedicated
@@ -147,7 +148,7 @@ function Registry:LoadDynamic(bridge)
     Registry._dynamic = {}
 
     buildRegistry(entries)
-    print(string.format("[UGCPrefabRegistry] 就绪，共 %d 个预制体", #entries))
+    UGCLog.Info("prefab_registry_ready", { total = #entries })
 end
 
 --============================================================
@@ -195,7 +196,7 @@ end
 --============================================================
 
 function Registry:AddCustomPrefab(_)
-    print("[UGCPrefabRegistry] 玩家 Blueprint 路径导入已禁用；请使用受验证的内容 Provider")
+    UGCLog.Warn("custom_prefab_disabled", { hint = "玩家 Blueprint 路径导入已禁用，请使用受验证的内容 Provider" })
     return false
 end
 

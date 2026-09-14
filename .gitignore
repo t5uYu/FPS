@@ -5,6 +5,8 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
+# Local tooling artifacts (e.g. Temp\LuaTools\lua54.exe built by Tools\UGCTests\run_tests.ps1)
+/Temp/
 .vs/
 .idea/
 *.sln/

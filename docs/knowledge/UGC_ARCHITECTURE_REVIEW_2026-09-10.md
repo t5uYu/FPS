@@ -419,7 +419,7 @@ Snapshot -> Validate -> Versioned Package -> Temp Write
 
 - `UUGCFunctionBridge::ExecuteFunction`：当前是假入口，删除或接统一 Command Registry。
 - `UGCPlaceableConfig.lua`：与动态 PrefabRegistry 重复，收敛为 Catalog。
-- `Util.json`、`Gameplay.UGC.json`、`UGCSerialize`：至少文档持久化只保留一个经测试实现。
+- ~~`Util.json`、`Gameplay.UGC.json`、`UGCSerialize`：至少文档持久化只保留一个经测试实现。~~ **已完成（T1，2026-09-14）**：只保留 `Util/json.lua`，另两份已删除并加静态守卫。
 - `ScheduleCallback(frames)`：只用于 UI 下一帧，不用于脚本 Delay。
 - Widget 中 `os.execute/io.open`：迁移后删除。
 
@@ -451,11 +451,19 @@ Snapshot -> Validate -> Versioned Package -> Temp Write
 - C++ Bridge 写操作增加 Authority 检查；假 `ExecuteFunction` 删除；API Key 改为 `FPS_UGC_LLM_API_KEY`。
 - DesktopPlatform 和磁盘 `.uasset` 扫描限制为 Editor 构建；Shipping 使用审核过的打包 Catalog。
 - Graph Widget 的 UObject View 缓存与纯图数据分离，已移除 UGC 路径强制 `collectgarbage`。
+- 序列化收敛（T1，2026-09-14）：`Gameplay/UGC/json.lua` 与 `UGCSerialize.lua` 删除，`Util/json.lua` 成为唯一编解码实现；`UGCSceneData` / `UGCPersistence` / `UGCFunctionRegistry` / `LLMGateway` / `WBP_UGCChat` 全部改用 `require("Util.json")`。
+- 顺带修复存量缺陷：`Util/json.lua` 内含非法转义 `'\/'`，在 Lua 5.4 下 `loadfile` 直接失败；此前它是死代码所以从未暴露，收敛后立即被回归测试（及扩大到全量 `Content/Script` 的语法扫描）捕获。
+- 结构化日志（T13，2026-09-14）：`UGCLog.lua` 成为 UGC 唯一日志出口；独立分类 `LogFPSUGC`（`UGCLog.h/.cpp` + `UUGCLog::WriteLine`）；单行日志带 SessionId / CommandId / ProgramId / EntityId 与稳定 ErrorCode（白名单校验 + 回归测试）；UGC 服务层已无裸 `print`。
+- 死代码清理（T18，2026-09-14）：删除 `EditorCore:SaveSceneJSON/LoadSceneJSON` 与 `SceneData:SerializeEditorJSON/DeserializeEditorJSON`（均无调用点，含二进制资产扫描确认）；旧序列化入口收敛为「Deserialize* 只读兼容 + Serialize* 标注 deprecated 的迁移导出」，并有静态守卫防回归。
+- 运行时依赖与 Shipping（T19，2026-09-14）：`HTTP/Json/PCG` 降为 Private、移除未使用的 `Niagara/ApplicationCore`；编辑器专用 API 守卫加入测试运行器；Shipping 构建探针发现并修复 `InventoryGridComponent.cpp` 误引 Editor-only 头（`IDetailTreeNode.h`）导致的 `C1083` 致命错误。
 
 ### 验证结果
 
 - 仓库 Lua 5.4.4 临时解释器对本次改动 Lua 全部 `loadfile` 通过。
-- 纯 Lua 回归：Document/Command/Compiler 8 项、SceneData/Projection/External/WorldRule 7 项、Registry Policy 1 项、LLM Tool Loop 1 项、Persistence 1 项，全部通过。
+- 纯 Lua 回归：Document/Command/Compiler 8 项、SceneData/Projection/External/WorldRule 7 项、Serialization 6 项（新增：旧 scene.json / programs.json 加载、`SerializeToJSON` 形状、NaN/Inf、键序确定性）、Registry Policy 1 项、LLM Tool Loop 1 项、Persistence 1 项，共 24 项全部通过。
+- 语法扫描范围从「UGC 两个目录」扩大到 `Content/Script` 全量（现 52 个文件），避免死代码语法错误再次漏网。
+- 回归总览（2026-09-14）：Lua 测试 32 项 + 4 组静态守卫（序列化收敛 / 死代码 / Shipping 安全性 / 依赖）全部通过。
+- 构建验证：UE 5.7 探针下新增 `UGCLog.cpp` 的 Shipping 单文件编译通过；完整 Shipping 构建被 UnLua 的 5.7 不兼容阻塞（细节见 `RISKS_AND_GAPS.md` 的 T19 记录），最终验证需 UE 5.4 环境。
 - UE 5.7 临时兼容构建中 UHT 通过；本轮 UGC C++ translation units 均成功编译并生成 `UnrealEditor-FPS.lib`。
 - 完整编辑器构建仍被既有第三方/工具兼容问题阻塞：UnLua 缺少 `DefaultParamCollection.inl`、Wwise 5.7 API 不兼容、UEEditorMCP `GetMaterialResource` 5.7 API 不兼容。项目目标版本仍是 UE 5.4。
 

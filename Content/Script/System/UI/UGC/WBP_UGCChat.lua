@@ -8,7 +8,7 @@
     - 最多保留 MAX_DISPLAY 条显示消息，避免文件过大
 ]]
 
-local json = require("Gameplay.UGC.json")
+local json = require("Util.json")
 
 local M = UnLua.Class()
 

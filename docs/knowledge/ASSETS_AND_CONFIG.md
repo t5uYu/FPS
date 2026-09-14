@@ -94,6 +94,7 @@ Tag 同时在 C++ Native 注册和 `DefaultGameplayTags.ini` 声明，修改时�
 - LLM Key：进程环境变量 `FPS_UGC_LLM_API_KEY`；禁止写入 Blueprint Defaults、Config、日志和提交文件。
 - `BP_UGCPlayerController.uasset` 中曾存在的 key-like 字符串已在 2026-09-10 原位抹除；必须在供应商侧轮换/吊销旧凭据。
 - UGC JSON：`UUGCStorageBridge`；仅允许 `.json`，使用临时文件、重读校验、`.bak` 和 rename 提交。
+- UGC JSON 编解码唯一实现：`Content/Script/Util/json.lua`（键序稳定、NaN/Inf -> `null`、失败返回 nil）；不要为存档再加第二个编解码器。
 - `DesktopPlatform` 仅 Editor 构建依赖；Shipping 不提供原生文件对话框或磁盘 `.uasset` 扫描。
 
 ## 6. 插件

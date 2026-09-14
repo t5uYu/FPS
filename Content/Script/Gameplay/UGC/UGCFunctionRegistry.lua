@@ -17,7 +17,8 @@
         Registry:GetSchemas()  -- 返回 JSON 字符串
 ]]
 
-local json = require("Gameplay.UGC.json")
+local json = require("Util.json")
+local Log = require("Gameplay.UGC.UGCLog")
 local Policy = require("Gameplay.UGC.UGCCapabilityPolicy")
 
 local Registry = {}
@@ -65,8 +66,7 @@ function Registry:Init(playerController)
         if not pcgBridge then return false, "PCG Bridge 组件不可用" end
         return pcgBridge:Cleanup(actor), "PCG 清理失败"
     end)
-
-    print("[UGCRegistry] 初始化完成，已注册函数数量: " .. self:Count())
+    Log.Info("registry_initialized", { functions = self:Count() })
 end
 
 --============================================================
@@ -501,7 +501,7 @@ function Registry:Call(name, params, context)
     local def = _funcs[name]
     local ok, r1, r2 = pcall(def.func, params or {}, context)
     if not ok then
-        print("[UGCRegistry] 执行出错: " .. tostring(r1))
+        Log.Error("registry_error", r1)
         return false, "执行异常: " .. tostring(r1)
     end
     return r1, r2

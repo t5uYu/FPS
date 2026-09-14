@@ -5,6 +5,8 @@
     submitted by UI, AI, graph scripts, or a future network transport.
 ]]
 
+local Log = require("Gameplay.UGC.UGCLog")
+
 local Bus = {}
 Bus.__index = Bus
 
@@ -53,7 +55,7 @@ end
 function Bus:_emit(event)
     for _, listener in ipairs(self.listeners) do
         local ok, err = pcall(listener, event)
-        if not ok then print("[UGCCommandBus] listener error: " .. tostring(err)) end
+        if not ok then Log.Error("listener_error", err, { origin = "command_bus" }) end
     end
 end
 
@@ -139,10 +141,7 @@ function Bus:Execute(command, context, options)
     end
 
     if options.emit ~= false then
-        print(string.format(
-            "[UGCCommand] id=%s source=%s type=%s ok=%s code=%s",
-            tostring(context.commandId), tostring(context.source), tostring(command.type),
-            tostring(result.ok), tostring(result.code)))
+        Log.Command(command, context, result)
         self:_emit({ command = command, context = context, result = result })
     end
     return result

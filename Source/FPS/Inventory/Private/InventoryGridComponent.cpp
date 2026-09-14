@@ -1,7 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 #include "FPS/Inventory/Public/InventoryGridComponent.h"
 
-#include "IDetailTreeNode.h"
+// 注意：不要在这里 include 编辑器专用头（例如 IDetailTreeNode.h）——
+// 它是 Editor-only 模块的接口，Shipping/Game 目标编译会直接失败（T19 构建验证发现）。
 #include "FPS/Inventory/Public/ItemDataManager.h"
 
 

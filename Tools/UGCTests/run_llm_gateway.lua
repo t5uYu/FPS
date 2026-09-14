@@ -1,7 +1,7 @@
 local root = assert(arg[1], "workspace root required")
 package.path = root .. "/Content/Script/?.lua;" .. root .. "/Content/Script/?/init.lua;" .. package.path
 
-local json = require("Gameplay.UGC.json")
+local json = require("Util.json")
 local executed = 0
 local registry = {}
 function registry:GetSchemas() return "[]" end

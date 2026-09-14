@@ -11,7 +11,8 @@
 ]]
 
 local PrefabRegistry = require("Gameplay.UGC.UGCPrefabRegistry")
-local UGCSerialize = require("Gameplay.UGC.UGCSerialize")
+local json = require("Util.json")
+local Log = require("Gameplay.UGC.UGCLog")
 local Document = require("Gameplay.UGC.UGCDocument")
 local CommandBus = require("Gameplay.UGC.UGCCommandBus")
 local WorldProjection = require("Gameplay.UGC.UGCWorldProjection")
@@ -85,7 +86,7 @@ local function notify(eventName, payload)
     if not listeners then return end
     for _, listener in ipairs(listeners) do
         local ok, err = pcall(listener, payload)
-        if not ok then print("[UGCSceneData] listener error: " .. tostring(err)) end
+        if not ok then Log.Error("listener_error", err, { origin = "scene_data", event = eventName }) end
     end
 end
 
@@ -356,7 +357,9 @@ function SceneData:Init(editorBridge)
     _commandBus = CommandBus.New({ historyLimit = HISTORY_LIMIT })
     _notificationBuffer = nil
     registerHandlers()
-    print("[UGCSceneData] Document/Command/Projection 初始化完成")
+    Log.SetContext({ document = _document.header.documentId })
+    Log.NewSession("scene_init")
+    Log.Info("scene_initialized", { schemaVersion = _document.header.schemaVersion, maxActors = ACTOR_MAX, historyLimit = HISTORY_LIMIT })
 end
 
 function SceneData:Shutdown()
@@ -365,6 +368,7 @@ function SceneData:Shutdown()
     _document, _projection, _commandBus, _bridge = nil, nil, nil, nil
     _listeners, _externalRestorers, _externalDestroyers = {}, {}, {}
     _worldRuleAdapter, _notificationBuffer = nil, nil
+    Log.ClearContext()
 end
 
 function SceneData:GetDocument() return _document end
@@ -467,7 +471,7 @@ function SceneData:Clear()
     _projection = WorldProjection.New(_bridge)
     _commandBus:ClearHistory()
     notify("changed", { kind = "document_cleared" })
-    print("[UGCSceneData] 场景已清空")
+    Log.Info("scene_cleared", { entities = _document:Count() })
 end
 
 function SceneData:IsDirty() return _document and _document.dirty or false end
@@ -503,7 +507,10 @@ function SceneData:CreateActorWithTransform(prefabName, transform, context)
     local result = self:ExecuteCommand({
         type = "CreateEntity", prefabName = prefabName, transform = transformToData(transform),
     }, context or { source = "legacy_api" })
-    if not result.ok then print("[UGCSceneData] CreateActor failed: " .. tostring(result.message)); return nil, nil end
+    if not result.ok then
+        Log.Error(result.code, result.message, { type = "CreateEntity", prefab = prefabName, source = "legacy_api" })
+        return nil, nil
+    end
     return result.data.sceneID, result.data.actor
 end
 
@@ -590,7 +597,7 @@ end
 
 function SceneData:DeleteActor(sceneID, context)
     local result = self:ExecuteCommand({ type = "DeleteEntity", sceneID = sceneID }, context or { source = "legacy_api" })
-    if not result.ok then print("[UGCSceneData] DeleteActor failed: " .. tostring(result.message)) end
+    if not result.ok then Log.Error(result.code, result.message, { type = "DeleteEntity", entity = sceneID }) end
     return result.ok
 end
 
@@ -598,7 +605,7 @@ function SceneData:ModifyActor(sceneID, newTransform, context)
     local result = self:ExecuteCommand({
         type = "SetTransform", sceneID = sceneID, transform = transformToData(newTransform),
     }, context or { source = "legacy_api" })
-    if not result.ok then print("[UGCSceneData] ModifyActor failed: " .. tostring(result.message)) end
+    if not result.ok then Log.Error(result.code, result.message, { type = "SetTransform", entity = sceneID }) end
     return result.ok
 end
 
@@ -620,7 +627,7 @@ function SceneData:GetAllActors()
     return result
 end
 
-function SceneData:PushUndo(_) print("[UGCSceneData] PushUndo 已废弃：请提交 Command") end
+function SceneData:PushUndo(_) Log.Warn("push_undo_deprecated", { hint = "提交 Command 而不是手动压栈" }) end
 local function executeHistory(operation, source)
     if not _commandBus or not _document then return false end
     local before = {
@@ -717,7 +724,18 @@ function SceneData:DeserializePackageTable(package)
     return true, "loaded"
 end
 
--- Legacy scene.json compatibility.
+--============================================================
+-- Legacy 存档格式兼容层（旧 scene.json / programs.json）
+--
+-- 运行时存档只经 UGCPersistence，写出的永远是单一 *.ugc.json 包。
+-- 本段落只保留两件事：
+--   * Deserialize*：旧存档「只读兼容」入口，UGCPersistence 的迁移路径仍在调用。
+--   * Serialize*  ：迁移/回归导出专用，运行时没有任何调用点；删除时必须同步
+--                   Tools/UGCTests/run_serialization.lua（它锁定了旧格式字段名）。
+-- 历史上这里另有一套 UGCSerialize 实现，已在 T1 收敛到 Util.json。
+--============================================================
+
+--- @deprecated 旧 scene.json 导出，仅用于迁移与回归；运行时写入请用 UGCPersistence。
 function SceneData:SerializeToJSON()
     local snapshot = _document and _document:Snapshot() or Document.New():Snapshot()
     local actors = {}
@@ -733,7 +751,7 @@ function SceneData:SerializeToJSON()
             metadata = record.external and record.metadata or nil,
         }
     end
-    return UGCSerialize.encode({
+    return json.encode({
         version = 3,
         documentId = snapshot.header.documentId,
         revision = snapshot.header.revision,
@@ -742,11 +760,11 @@ function SceneData:SerializeToJSON()
         actors = actors,
         generatedGroups = snapshot.generatedGroups,
         worldSettings = snapshot.worldSettings,
-    })
+    }, "  ")
 end
 
 function SceneData:DeserializeFromJSON(encoded)
-    local data = UGCSerialize.decode(encoded)
+    local data = json.decode(encoded)
     if type(data) ~= "table" then return false, "scene.json decode 失败" end
     local entities = {}
     for _, actor in ipairs(data.actors or {}) do
@@ -780,17 +798,17 @@ function SceneData:DeserializeFromJSON(encoded)
     })
 end
 
+--- @deprecated 旧 programs.json 导出，仅用于迁移与回归；运行时写入请用 UGCPersistence。
 function SceneData:SerializeProgramsJSON()
-    return UGCSerialize.encode({ version = 2, programs = copy(_document and _document.programs or {}) })
+    return json.encode({ version = 2, programs = copy(_document and _document.programs or {}) }, "  ")
 end
+--- 旧 programs.json 只读兼容入口（迁移路径）。
 function SceneData:DeserializeProgramsJSON(encoded)
-    local data = UGCSerialize.decode(encoded)
+    local data = json.decode(encoded)
     if type(data) ~= "table" or type(data.programs) ~= "table" then return false end
     _document.programs = copy(data.programs)
     _document.dirty = false
     return true
 end
-function SceneData:SerializeEditorJSON() return UGCSerialize.encode({ version = 1, blueprintEditors = {} }) end
-function SceneData:DeserializeEditorJSON(_) return true end
 
 return SceneData

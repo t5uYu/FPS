@@ -8,6 +8,7 @@
 local Registry = require("Gameplay.UGC.UGCFunctionRegistry")
 local SceneData = require("Gameplay.UGC.UGCSceneData")
 local Compiler = require("Gameplay.UGC.UGCGraphCompiler")
+local UGCLog = require("Gameplay.UGC.UGCLog")
 
 local Runner = {}
 Runner.__index = Runner
@@ -21,11 +22,14 @@ local _nextTaskId = 1
 
 local MAX_STEPS_PER_RUN = 128
 local MAX_TASKS_PER_TICK = 64
-local LOG_TAG = "[UGCProgramRunner]"
+-- 运行期日志统一走 UGCLog（program 字段是排障主键，见 logProgram）
+local _activeProgram = nil
 
-local function Log(message) print(LOG_TAG .. " " .. tostring(message)) end
-local function Warn(message) print(LOG_TAG .. "[Warn] " .. tostring(message)) end
-
+local function logProgram(fields)
+    local payload = fields or {}
+    payload.program = payload.program or _activeProgram
+    return payload
+end
 local function commandContext(programID, nodeID)
     return { source="script", approved=true, programId=programID, nodeId=nodeID }
 end
@@ -46,7 +50,7 @@ function Runner:Init(playerController)
             _delayedTasks = {}
         end
     end)
-    Log("初始化完成")
+    UGCLog.Info("runner_initialized", { maxStepsPerRun = MAX_STEPS_PER_RUN, maxTasksPerTick = MAX_TASKS_PER_TICK })
 end
 
 function Runner:InvalidateProgram(programID)
@@ -91,9 +95,9 @@ function Runner:ValidateProgram(programID)
 end
 
 function Runner:RunProgram(programID, eventType, context)
-    if not _initialized then Warn("Runner 未初始化"); return false end
+    if not _initialized then UGCLog.Error("not_initialized", "ProgramRunner 未初始化"); return false end
     local program = self:GetCompiledProgram(programID)
-    if not program then Warn("程序编译失败: " .. tostring(programID)); return false end
+    if not program then UGCLog.Error("compilation_failed", "图程序编译失败", { program = programID }); return false end
     local entries = program.events[eventType] or {}
     for _, eventNodeId in ipairs(entries) do
         self:_executeFrom(programID, program, eventNodeId, "exec_out", context or {}, 0)
@@ -173,14 +177,15 @@ function Runner:Tick(deltaTime)
             table.remove(_delayedTasks, i)
             executed = executed + 1
             local ok, err = pcall(task.callback)
-            if not ok then Warn("延迟任务异常: " .. tostring(err)) end
+            if not ok then UGCLog.Error("exception", err, logProgram({ task = task.nodeID, program = task.programID })) end
         end
     end
 end
 
 function Runner:_executeFrom(programID, program, fromID, fromPin, context, steps)
+    _activeProgram = programID
     if steps >= MAX_STEPS_PER_RUN then
-        Warn("执行预算耗尽: " .. tostring(programID)); return
+        UGCLog.Error("budget_exhausted", "单帧执行步数超预算", logProgram({ steps = MAX_STEPS_PER_RUN })); return
     end
     local instruction = program.instructions[fromID]
     local nextID = instruction and instruction.next[fromPin]
@@ -188,15 +193,16 @@ function Runner:_executeFrom(programID, program, fromID, fromPin, context, steps
 end
 
 function Runner:_executeInstruction(programID, program, nodeID, context, steps)
+    _activeProgram = programID
     local instruction = program.instructions[nodeID]
-    if not instruction then Warn("指令不存在: " .. tostring(nodeID)); return end
+    if not instruction then UGCLog.Error("unknown_instruction", "指令节点不存在", logProgram({ node = nodeID })); return end
     local p = instruction.params or {}
     local opcode = instruction.opcode
     local ctx = commandContext(programID, nodeID)
     local function callAndContinue(name, params)
         local ok, result = Registry:Call(name, params, ctx)
         if not ok then
-            Warn(string.format("节点 %s 执行失败 [%s]: %s", tostring(nodeID), tostring(name), tostring(result)))
+            UGCLog.Error("node_failed", result, logProgram({ node = nodeID, func = name }))
             return false
         end
         self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
@@ -215,7 +221,7 @@ function Runner:_executeInstruction(programID, program, nodeID, context, steps)
         callAndContinue("pcg_clear", {})
     elseif opcode == "PRINT" then
         local message = tostring(p.msg or "")
-        Log("PrintMsg: " .. message)
+        UGCLog.Info("program_print", logProgram({ node = nodeID, message = message }))
         if _pc then pcall(UE.UKismetSystemLibrary.PrintString, _pc, message, true, true, UE.FLinearColor(0.1, 0.9, 1.0, 1.0), 5.0) end
         self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
     elseif opcode == "BRANCH" then
@@ -227,7 +233,7 @@ function Runner:_executeInstruction(programID, program, nodeID, context, steps)
             self:_executeFrom(programID, program, nodeID, "exec_out", context, steps)
         end, {programID=programID, nodeID=nodeID})
     else
-        Warn("不支持的 opcode: " .. tostring(opcode))
+        UGCLog.Error("unsupported_opcode", "不支持的 opcode", logProgram({ opcode = tostring(opcode) }))
     end
 end
 

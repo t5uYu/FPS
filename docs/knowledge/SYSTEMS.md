@@ -229,7 +229,16 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 - 主格式：单一版本化 `*.ugc.json`，包含 Document、Programs、Groups、WorldSettings 和 editor state。
 - `UUGCStorageBridge` 提供 UTF-8 读取和 temp/verify/backup/rename 原子写入；Widget、LLM、Prefab Registry 不再直接 `io.open/os.execute`。
 - 旧 `scene.json + programs.json` 仍可读取迁移。
+- 编解码只有一份：`Content/Script/Util/json.lua`。对象键按字典序输出以保证存档可 diff；非有限数（NaN/Inf）编码为 `null`；decode 失败返回 nil 而不抛异常。`Gameplay/UGC/json.lua` 与 `UGCSerialize.lua` 已删除，`Tools/UGCTests/run_tests.ps1` 有静态守卫断言它们不再出现。
 - `Saved/UGC/` 不进 Git。
+
+### 日志
+
+- 唯一出口：`Content/Script/Gameplay/UGC/UGCLog.lua`。UGC 服务层（CommandBus / SceneData / Persistence / FunctionRegistry / LLMGateway / EditorCore / ProgramRunner / PrefabRegistry / PlayerController / Generators）不再直接 `print`。
+- 单行格式：`event=... severity=... session=... document=... command=... type=... ok=... code=... program=... entity=... fields={...}`。已知字段扁平可 grep，其余进 `fields` JSON（经 `Util.json` 编码，键序稳定可 diff）。
+- UE 侧分类：`Source/FPS/UGC/UGCLog.h/.cpp` 定义独立 `LogFPSUGC`，Lua 经 `UUGCLog::WriteLine` 落地；编辑器外/单测无 UE 环境时退回 `print`（UnLua 会转发到 LogUnLua）。可用 `-LogCmds="LogFPSUGC Verbose"` 单独开关。
+- 稳定 ErrorCode：`UGCLog.Codes` 是白名单，未登记的 code 会被写成 `code=unregistered_code` 并把原值放进 fields；`Tools/UGCTests/run_logging.lua` 会扫描 `Content/Script`，出现未登记 code 直接判失败。
+- SessionId 由 `SceneData:Init` 调 `Log.NewSession("scene_init")` 生成，命令/存档/图程序日志都会带上它。
 
 ## 9. UGC LLM 与函数调用
 

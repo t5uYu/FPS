@@ -120,6 +120,28 @@ AttributeSet 使用 `EffectContext.GetEffectCauser()` 并要求可转为 `AFPSCh
 - C++ Native GameplayTags 与 INI 同时声明，存在双维护漂移。
 - 仓库包含大量重复迁移素材与 StarterContent，搜索时容易命中错误副本。
 
+## 构建与运行时依赖（T19 验证记录，2026-09-14）
+
+本机只有 UE 5.7（项目目标 5.4），因此用 5.7 + 临时补丁做了一次 Shipping 构建探针，结论如下。
+
+### 已修复
+
+- `Source/FPS/Inventory/Private/InventoryGridComponent.cpp` 曾 `#include "IDetailTreeNode.h"`（Editor-only，且全文件未使用）。这一行会让 **Shipping/Game 目标直接编译失败**（`fatal error C1083`），已删除并就地留注释。这是本轮 Shipping 探针抓到的真实缺陷。
+- `Tools/UGCTests/run_tests.ps1` 增加守卫：编辑器专用 include/符号（DesktopPlatform、IDetailTreeNode、PropertyEditor、UnrealEd、GEditor 等）必须位于 `#if WITH_EDITOR` 内；`FPS.Build.cs` 必须把 DesktopPlatform 放在 `Target.bBuildEditor` 后面。
+
+### 依赖瘦身（FPS.Build.cs）
+
+- `HTTP` / `Json` / `PCG` 只在 `UGCHttpClient.cpp`、`UGCPCGBridge.cpp` 内部使用 → 从 Public 移到 Private。
+- 移除 `Niagara`（全模块零符号引用）与 `ApplicationCore`（无直接引用，Slate/UMG 自身公开传递）。
+- `DesktopPlatform` 保持 editor-only；`AIModule` 必须保留（`FPSCharacter.h` 暴露 `IGenericTeamAgentInterface`，该头位于 AIModule）。
+- 更深一层的"Runtime Core 只依赖 Core/CoreUObject/Engine"需要 T11 拆插件才能达成。
+
+### 探针结果（UE 5.7，非项目目标版本）
+
+- 通过：UBT 解析全部模块规则与 UHT 全量头文件解析；新增 `Source/FPS/UGC/UGCLog.cpp` 在 **Shipping** 配置下单文件编译成功（`-SingleFile`）。
+- 阻塞（第三方，非本项目代码）：`Plugins/UnLua/Source/UnLua/Private/DefaultParamCollection.cpp` 依赖 UBT 插件生成的 `DefaultParamCollection.inl`；该插件是 net6.0，UE 5.7 的 UBT 只接受 net8.0，把它重定向到 net8.0 后又因 UHT API 变更（`UhtSession.Packages`、`UhtModule.ModuleType/Name/OutputDirectory` 已移除）编译失败。结论：**UE 5.7 下无法完整构建，与项目代码无关；最终 Shipping 验证必须在 UE 5.4 环境执行（并需要在该机器上装 .NET SDK）。**
+- 探针用的临时改动（`FPS.uproject` 引擎关联、`FPS.Target.cs` 的 `bOverrideBuildEnvironment`、`UnLuaSettings.h` 的 `MetaClass`、UnLua collector 的 TFM）均已逐字节还原（SHA256 已校验）。
+
 ## 验证缺口
 
 本次未启动 Unreal Editor，UEEditorMCP 55558 端口不可连接，因此以下内容仍需编辑器内验证：

@@ -8,7 +8,8 @@
 ]]
 
 local Registry = require("Gameplay.UGC.UGCFunctionRegistry")
-local json = require("Gameplay.UGC.json")
+local json = require("Util.json")
+local Log = require("Gameplay.UGC.UGCLog")
 
 local Gateway = {}
 Gateway.__index = Gateway
@@ -52,7 +53,7 @@ function Gateway:Init(playerController)
     _pendingProposal = nil
     _toolRound = 0
     if not self:LoadHistory() then _history = {} end
-    print("[LLMGateway] 初始化完成，历史条数: " .. #_history)
+    Log.Info("llm_gateway_initialized", { history = #_history })
 end
 
 function Gateway:SaveHistory()
