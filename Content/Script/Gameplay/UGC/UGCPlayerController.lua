@@ -18,6 +18,9 @@ local Persistence    = require("Gameplay.UGC.UGCPersistence")
 local UGCLog        = require("Gameplay.UGC.UGCLog")
 
 local M = UnLua.Class("Gameplay.PlayerController")
+
+-- T3：编辑器内 PIE 验收（冒烟）驱动句柄
+local _smokeTest = nil
 local Base = require("Gameplay.PlayerController")
 
 --============================================================
@@ -37,6 +40,22 @@ function M:ReceiveBeginPlay()
     ProgramRunner:Init(self)
     LLMGateway:Init(self)
     UGCLog.Info("ugc_layer_initialized")
+
+    -- T3：编辑器内 PIE 验收（由 -ExecCmds="UGC.SmokeTestEnable" 打开）
+    if self.IsUGCSmokeTestEnabled and self:IsUGCSmokeTestEnabled() then
+        self:RunUGCSmokeTest()
+    end
+end
+
+--- T3 冒烟验收入口（C++ 的 BlueprintImplementableEvent 在 Lua 侧实现）
+function M:RunUGCSmokeTest()
+    local ok, SmokeTest = pcall(require, "Gameplay.UGC.UGCSmokeTest")
+    if not ok or not SmokeTest then
+        UGCLog.Error("smoke_unavailable", tostring(SmokeTest))
+        return
+    end
+    _smokeTest = SmokeTest
+    SmokeTest:Start(self)
 end
 
 -- F9 切换关卡编辑器
@@ -158,6 +177,9 @@ function M:ReceiveTick(deltaTime)
 
     -- 自动保存调度（T14）：绑定过项目后按 interval / minInterval 节流写盘，未绑定时直接返回
     Persistence:Tick(deltaTime)
+
+    -- T3：冒烟验收（分帧步骤机）
+    if _smokeTest then _smokeTest:Tick(deltaTime) end
 
     -- 蓝图编辑器：连线重绘。
     -- T10：重绘的触发源是 ViewModel 的 "wires" 通道（文档事件驱动），Tick 只做两件事：

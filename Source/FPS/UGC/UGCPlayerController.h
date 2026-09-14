@@ -78,6 +78,29 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UGC|Utility")
     void CopyToClipboard(const FString& Text);
 
+    //-------------------------------------------------------------------
+    // T3：编辑器内 PIE 验收（冒烟测试）
+    //-------------------------------------------------------------------
+
+#if WITH_EDITOR
+    /**
+     * 是否要在 BeginPlay 时自动跑 7 项 UGC 冒烟验收。
+     * 由编辑器启动参数 `-ExecCmds="UGC.SmokeTestEnable"` 打开（见 UGCSmokeTestCommands.cpp），
+     * Lua 侧在 ReceiveBeginPlay 里查询它，避免用「人工去控制台敲命令」这种不可复现的步骤。
+     * （WITH_EDITOR 守卫：实现只在编辑器构建里存在，Shipping 不链接这两个函数。）
+     */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Test")
+    bool IsUGCSmokeTestEnabled() const;
+
+    /** 手动触发冒烟验收（编辑器控制台 `UGC.SmokeTest` 也会调它）；Lua 实现 RunUGCSmokeTest */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Test")
+    void RequestUGCSmokeTest();
+#endif
+
+    /** 冒烟验收主入口，Lua 实现（BlueprintImplementableEvent → UnLua 里写 M:RunUGCSmokeTest） */
+    UFUNCTION(BlueprintImplementableEvent, Category = "UGC|Test")
+    void RunUGCSmokeTest();
+
     /** 编辑模式鼠标左键点击，Lua 可覆盖 */
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UGC")
     void EditorClick();
