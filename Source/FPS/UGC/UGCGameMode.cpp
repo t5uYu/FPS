@@ -1,18 +1,28 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UGCGameMode.h"
+#include "UGCPlayerController.h"
+#include "FPS/Team/FPSPlayerState.h"
 #include "GameFramework/SpectatorPawn.h"
+#include "UObject/ConstructorHelpers.h"
 
 AUGCGameMode::AUGCGameMode()
 {
-    // 幽灵视角：自由飞行，无碰撞，无重力
     DefaultPawnClass = ASpectatorPawn::StaticClass();
+    PlayerControllerClass = AUGCPlayerController::StaticClass();
+    PlayerStateClass = AFPSPlayerState::StaticClass();
 
-    bDelayedStart = false;
+    static ConstructorHelpers::FClassFinder<APlayerController> ControllerFinder(
+        TEXT("/Game/_UGC/Blueprints/BP_UGCPlayerController"));
+    if (ControllerFinder.Succeeded())
+    {
+        PlayerControllerClass = ControllerFinder.Class;
+    }
 }
 
 void AUGCGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
 {
-    // 直接调用基类逻辑（出生点选择 + Pawn 生成），跳过队伍分配等 PVP 逻辑
+    // Use the framework spawn path only. No FPS team assignment or match-state
+    // gate is allowed in the authoring world.
     Super::HandleStartingNewPlayer_Implementation(NewPlayer);
 }

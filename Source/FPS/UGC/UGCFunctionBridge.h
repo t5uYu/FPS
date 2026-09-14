@@ -103,25 +103,19 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UGC|Rule")
     bool SetGameRule(const FString& RuleName, float Value);
 
+    /** Begin/end an isolated playtest mutation session. */
+    void BeginPlaytestSession();
+    void EndPlaytestSession();
+
+    /** Reset all UGC runtime rules to their authored defaults. */
+    UFUNCTION(BlueprintCallable, Category = "UGC|Rule")
+    void ResetGameRules();
+
     /**
      * 读取当前规则值，规则名不合法返回 -1
      */
     UFUNCTION(BlueprintCallable, Category = "UGC|Rule")
     float GetGameRule(const FString& RuleName) const;
-
-    //-------------------------------------------------------------------
-    // LLM 统一入口
-    //-------------------------------------------------------------------
-
-    /**
-     * LLM Function Calling 统一执行入口
-     * 内部转发给 UGCFunctionRegistry.lua 的 :Call()
-     * @param FuncName    函数名（与 Registry 注册名一致）
-     * @param ParamsJSON  参数 JSON 字符串，如 {"damage":50,"cooldown":10}
-     * @return 执行结果 JSON 字符串，{"ok":true} 或 {"ok":false,"error":"..."}
-     */
-    UFUNCTION(BlueprintCallable, Category = "UGC|LLM")
-    FString ExecuteFunction(const FString& FuncName, const FString& ParamsJSON);
 
 protected:
     virtual void BeginPlay() override;
@@ -136,8 +130,23 @@ private:
     /** 获取 Character 的 CombatAttributeSet（可能为 nullptr） */
     UFPSCombatAttributeSet* GetCombatAttributes() const;
 
+    /** 所有 World/GAS 写操作的统一 Authority 守卫。 */
+    bool HasWriteAuthority() const;
+
+    /** C++ 最终防线：只允许审核过的 GameplayAbility 类路径。 */
+    bool IsAbilityClassAllowed(TSubclassOf<UFPSGameplayAbility> AbilityClass) const;
+
     /** 已通过 GrantAbility 授予的 Handle，用于 RemoveAbility */
     TMap<TSubclassOf<UFPSGameplayAbility>, FGameplayAbilitySpecHandle> GrantedHandles;
+
+    TArray<FActiveGameplayEffectHandle> AppliedEffectHandles;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<AFPSWorldWeapon>> SpawnedWeapons;
+
+    TMap<FString, float> PlaytestAttributeSnapshot;
+    TMap<FString, float> PlaytestRuleSnapshot;
+    bool bPlaytestSessionActive = false;
 
     /** 游戏规则运行时存储（本局有效，不持久化） */
     TMap<FString, float> GameRules;

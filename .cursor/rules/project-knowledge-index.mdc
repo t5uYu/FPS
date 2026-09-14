@@ -1,0 +1,30 @@
+---
+description: Use the maintained FPS project knowledge index before scanning the repository
+alwaysApply: true
+---
+
+# FPS Project Knowledge Workflow
+
+- Start with `PROJECT_INDEX.md`.
+- For a subsystem task, read only the matching section in:
+  - `docs/knowledge/ARCHITECTURE.md`
+  - `docs/knowledge/SYSTEMS.md`
+  - `docs/knowledge/ASSETS_AND_CONFIG.md`
+  - `docs/knowledge/RISKS_AND_GAPS.md`
+- Search `docs/knowledge/generated/index.json` or run:
+  `python Tools/ProjectIndex/query_index.py <terms>`
+- Do not recursively read these by default:
+  `Plugins/Wwise*`, `Plugins/UnLua*`, `Plugins/UEEditorMCP/Python/.venv`,
+  `Content/FPS`, `Content/ShootingAI`, `Content/StarterContent`,
+  `Content/SpaceshipInterior`.
+- Treat C++/Lua/INI/JSON as verified text facts. Treat offline `.uasset`
+  strings as hints; use live UEEditorMCP for Blueprint graph/CDO certainty.
+- Before relying on the index after meaningful source/config/asset changes, run:
+  `python Tools/ProjectIndex/build_index.py --check`.
+- After changing core C++, Lua, Config, custom plugins, or core assets, run:
+  `python Tools/ProjectIndex/build_index.py`.
+- When implementation conflicts with historical `README.pdf`, current source and
+  Blueprint configuration win; record deliberate architecture changes in the
+  knowledge docs.
+- Read `docs/knowledge/RISKS_AND_GAPS.md` before touching networking, respawn,
+  armor/damage, recoil, UI navigation, hardcoded asset paths, or UGC persistence.

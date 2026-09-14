@@ -57,7 +57,7 @@ public:
      * @param Location  生成中心点（世界坐标）
      * @param Radius    生成半径（cm），0 = 使用默认值
      * @param Seed      随机种子，0 = 随机
-     * @param GraphPath PCG Graph 资产路径，空 = 使用 DefaultPCGGraph
+     * @param GraphPath 保留兼容参数；必须为空，仅允许使用审核过的 DefaultPCGGraph
      * @return 生成的根 Actor，失败返回 nullptr
      */
     UFUNCTION(BlueprintCallable, Category = "UGC|PCG")

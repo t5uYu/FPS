@@ -1,27 +1,15 @@
 --[[
     UGCPrefabRegistry.lua
-    预制体注册表 — 自动扫描 + 元数据覆盖 + 玩家自定义
+    预制体注册表 — 打包 Catalog + Editor-only 资产发现
 
-    数据来源（按顺序合并）：
-      ① bridge:FindFilesInDirectory()  扫描 Content/_UGC/Placeables/*.uasset
-           → 自动发现所有 BP_Placeable_Xxx / BA_Placeable_Xxx 蓝图（PIE/Development 可用）
-      ② Content/_UGC/Placeables/placeable_manifest.json
-           → 为已扫描到的资产补充 label / category / path（可选）
-           → 只有显式提供 path / blueprintPath 时，才允许补充“未扫描到”的条目
-      ③ Saved/UGC/custom_prefabs.json
-           → 玩家运行时添加的自定义预制体
-
-    新增预制体（开发者）：
-      只需在 _UGC/Placeables/ 里建 BP_Placeable_Xxx / BA_Placeable_Xxx，下次 PIE 自动出现。
-      想自定义显示名/分类：在 placeable_manifest.json 加一行即可。
-      如果资源名不遵循默认命名规则，可在 manifest 里显式填写 path。
-
-    新增预制体（玩家/运行时）：
-      Registry:AddCustomPrefab({ id, label, category, blueprintPath })
+    运行时只信任 UGCPlaceableConfig.lua 中审核过的显式资产路径；Editor PIE
+    可扫描 Content/_UGC/Placeables 以发现开发中的新资产。玩家提供任意
+    BlueprintClass 路径的入口已禁用，后续应由带哈希和校验的内容 Provider 取代。
 ]]
 
 -- JSON 工具：使用统一的 json.lua 模块
-local json = require("Gameplay.UGC.json")
+local PackagedCatalog = require("Gameplay.UGC.UGCPlaceableConfig")
+local UGCLog = require("Gameplay.UGC.UGCLog")
 
 local Registry = {}
 
@@ -40,11 +28,6 @@ local PLACEABLE_BASE = "/Game/_UGC/Placeables/"
 
 local function assetNameToClassPath(assetName)
     return PLACEABLE_BASE .. assetName .. "." .. assetName .. "_C"
-end
-
--- blueprintPath 命名规则：从 id 自动推导
-local function idToPath(id)
-    return assetNameToClassPath("BP_Placeable_" .. id)
 end
 
 local function normalizeBlueprintClassPath(path)
@@ -99,7 +82,7 @@ local function buildRegistry(entries)
     local catOrder = {}
 
     for _, e in ipairs(entries) do
-        Registry.Prefabs[e.id] = e.path or idToPath(e.id)
+        Registry.Prefabs[e.id] = assert(e.path, "prefab catalog entry requires path")
         Registry.Meta[e.id] = {
             label       = e.label or e.id,
             category    = e.category or "方块",
@@ -128,14 +111,6 @@ local function getContentDir()
     return UE.UKismetSystemLibrary.GetProjectDirectory() .. "Content/"
 end
 
-local function getSavedDir()
-    return UE.UKismetSystemLibrary.GetProjectDirectory() .. "Saved/UGC/"
-end
-
-local function ensureSavedDir()
-    pcall(function() UE.UKismetSystemLibrary.MakeDirectory(getSavedDir()) end)
-end
-
 --============================================================
 -- LoadDynamic：三步合并
 --============================================================
@@ -145,7 +120,19 @@ function Registry:LoadDynamic(bridge)
     local entries = {}   -- 最终合并结果（有序）
     local seen    = {}   -- 去重
 
-    -- ① 扫描 _UGC/Placeables/*.uasset
+    -- ⓪ Packaged catalog: runtime-safe source of truth for shipped assets.
+    for _, item in ipairs(PackagedCatalog) do
+        local path = normalizeBlueprintClassPath(item.path or item.blueprintPath)
+        if item.id and path and not seen[item.id] then
+            seen[item.id] = true
+            entries[#entries + 1] = {
+                id=item.id, label=item.label, category=item.category,
+                description=item.description, tags=item.tags, path=path,
+            }
+        end
+    end
+
+    -- ① Editor-only discovery of newly authored assets.
     if bridge then
         local dir   = getContentDir() .. "_UGC/Placeables/"
         local files = bridge:FindFilesInDirectory(dir, "*.uasset")
@@ -159,96 +146,15 @@ function Registry:LoadDynamic(bridge)
                 end
             end
         end
-        print(string.format("[UGCPrefabRegistry] 扫描到 %d 个预制体", #entries))
+        UGCLog.Info("prefab_scan", { discovered = #entries })
     end
 
-    -- ② 读 placeable_manifest.json 补充 label / category / path
-    local manifestPath = getContentDir() .. "_UGC/Placeables/placeable_manifest.json"
-    local mf = io.open(manifestPath, "r")
-    if mf then
-        local arr = json.decode(mf:read("*a")) or {}
-        mf:close()
-        local meta = {}
-        for _, item in ipairs(arr) do
-            if item.id then meta[item.id] = item end
-        end
-
-        for _, e in ipairs(entries) do
-            local item = meta[e.id]
-            if item then
-                e.label       = item.label       or e.label
-                e.category    = item.category    or e.category
-                e.description = item.description or e.description
-                e.tags        = item.tags        or e.tags
-                e.path        = normalizeBlueprintClassPath(item.blueprintPath or item.path) or e.path
-                meta[e.id] = nil
-            end
-        end
-
-        local manifestOnlyCount = 0
-        local skippedCount = 0
-        for id, item in pairs(meta) do
-            if not seen[id] then
-                local explicitPath = normalizeBlueprintClassPath(item.blueprintPath or item.path)
-                if explicitPath then
-                    seen[id] = true
-                    entries[#entries+1] = {
-                        id          = id,
-                        label       = item.label or id,
-                        category    = item.category or "方块",
-                        description = item.description,
-                        tags        = item.tags,
-                        path        = explicitPath,
-                    }
-                    manifestOnlyCount = manifestOnlyCount + 1
-                else
-                    skippedCount = skippedCount + 1
-                end
-            end
-        end
-
-        if manifestOnlyCount > 0 then
-            print(string.format("[UGCPrefabRegistry] Manifest 补充 %d 个显式路径预制体", manifestOnlyCount))
-        end
-        if skippedCount > 0 then
-            print(string.format("[UGCPrefabRegistry] Manifest 中 %d 个未落地资源已跳过（缺少扫描结果且未提供 path）", skippedCount))
-        end
-    end
-
-    -- ③ 加载玩家自定义 JSON
+    -- Player-supplied Blueprint paths remain disabled until a dedicated
+    -- importer/provider performs content hashing and asset validation.
     Registry._dynamic = {}
-    local customPath = getSavedDir() .. "custom_prefabs.json"
-    local cf = io.open(customPath, "r")
-    if not cf then
-        ensureSavedDir()
-        local fw = io.open(customPath, "w")
-        if fw then fw:write("[]"); fw:close() end
-    else
-        local arr = json.decode(cf:read("*a")) or {}
-        cf:close()
-        for _, e in ipairs(arr) do
-            local dynamicPath = normalizeBlueprintClassPath(e.blueprintPath or e.path)
-            if e.id and dynamicPath and not seen[e.id] then
-                seen[e.id] = true
-                Registry._dynamic[#Registry._dynamic+1] = {
-                    id           = e.id,
-                    label        = e.label,
-                    category     = e.category,
-                    blueprintPath= dynamicPath,
-                }
-                entries[#entries+1] = {
-                    id       = e.id,
-                    label    = e.label    or e.id,
-                    category = e.category or "玩家自定义",
-                    path     = dynamicPath,
-                }
-            end
-        end
-        print(string.format("[UGCPrefabRegistry] 加载 %d 个自定义预制体", #Registry._dynamic))
-    end
 
     buildRegistry(entries)
-    print(string.format("[UGCPrefabRegistry] 就绪，共 %d 个预制体", #entries))
+    UGCLog.Info("prefab_registry_ready", { total = #entries })
 end
 
 --============================================================
@@ -256,13 +162,7 @@ end
 --============================================================
 
 function Registry:SaveDynamic()
-    ensureSavedDir()
-    local path = getSavedDir() .. "custom_prefabs.json"
-    local f    = io.open(path, "w")
-    if f then
-        f:write(json.encode(Registry._dynamic, "  "))
-        f:close()
-    end
+    return false
 end
 
 --============================================================
@@ -309,40 +209,9 @@ end
 -- 运行时添加自定义预制体（玩家上传）
 --============================================================
 
-function Registry:AddCustomPrefab(def)
-    assert(def.id and def.blueprintPath, "AddCustomPrefab: 缺少 id 或 blueprintPath")
-    if Registry.Prefabs[def.id] then
-        print("[UGCPrefabRegistry] id=" .. def.id .. " 已存在")
-        return false
-    end
-
-    local normalizedPath = normalizeBlueprintClassPath(def.blueprintPath)
-    local entry = {
-        id            = def.id,
-        label         = def.label        or def.id,
-        category      = def.category     or "玩家自定义",
-        blueprintPath = normalizedPath,
-    }
-    Registry._dynamic[#Registry._dynamic+1] = entry
-    Registry.Prefabs[entry.id] = normalizedPath
-
-    -- 追加到 Categories
-    local catName = entry.category
-    for _, cat in ipairs(Registry.Categories) do
-        if cat.name == catName then
-            cat.items[#cat.items+1] = { id=entry.id, label=entry.label }
-            self:SaveDynamic()
-            return true
-        end
-    end
-
-    Registry.Categories[#Registry.Categories+1] = {
-        name  = catName,
-        items = { { id=entry.id, label=entry.label } },
-    }
-    self:SaveDynamic()
-    print("[UGCPrefabRegistry] 已添加: " .. entry.id)
-    return true
+function Registry:AddCustomPrefab(_)
+    UGCLog.Warn("custom_prefab_disabled", { hint = "玩家 Blueprint 路径导入已禁用，请使用受验证的内容 Provider" })
+    return false
 end
 
 function Registry:RemovePrefab(id)

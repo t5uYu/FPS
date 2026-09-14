@@ -7,7 +7,10 @@
 #include "FPS/GAS/FPSGameplayAbility.h"
 #include "FPS/GAS/FPSCombatAttributeSet.h"
 #include "FPS/Level/FPSWorldWeapon.h"
+#include "FPS/Inventory/Public/ItemDataManager.h"
+#include "FPS/Inventory/InventoryTypes.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/WorldSettings.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -59,17 +62,77 @@ namespace UGCRuleWhitelist
 UUGCFunctionBridge::UUGCFunctionBridge()
 {
     PrimaryComponentTick.bCanEverTick = false;
-
-    // 规则默认值
-    GameRules.Add(TEXT("RoundTime"),    300.f);
-    GameRules.Add(TEXT("RespawnDelay"), 5.f);
-    GameRules.Add(TEXT("FriendlyFire"), 0.f);
-    GameRules.Add(TEXT("GravityScale"), 1.f);
+    ResetGameRules();
 }
 
 void UUGCFunctionBridge::BeginPlay()
 {
     Super::BeginPlay();
+}
+
+void UUGCFunctionBridge::BeginPlaytestSession()
+{
+    if (bPlaytestSessionActive || !HasWriteAuthority()) return;
+
+    static const TCHAR* AttributeNames[] = {
+        TEXT("MaxHealth"), TEXT("Health"), TEXT("Armor"),
+        TEXT("MovementSpeed"), TEXT("Stamina"),
+    };
+    PlaytestAttributeSnapshot.Reset();
+    for (const TCHAR* Name : AttributeNames)
+    {
+        const float Value = GetAttribute(Name);
+        if (Value >= 0.f) PlaytestAttributeSnapshot.Add(Name, Value);
+    }
+    PlaytestRuleSnapshot = GameRules;
+    bPlaytestSessionActive = true;
+}
+
+void UUGCFunctionBridge::EndPlaytestSession()
+{
+    if (!bPlaytestSessionActive || !HasWriteAuthority()) return;
+
+    if (UAbilitySystemComponent* ASC = GetASC())
+    {
+        for (const TPair<TSubclassOf<UFPSGameplayAbility>, FGameplayAbilitySpecHandle>& Pair : GrantedHandles)
+        {
+            ASC->ClearAbility(Pair.Value);
+        }
+        for (const FActiveGameplayEffectHandle& Handle : AppliedEffectHandles)
+        {
+            ASC->RemoveActiveGameplayEffect(Handle);
+        }
+    }
+    GrantedHandles.Reset();
+    AppliedEffectHandles.Reset();
+
+    for (AFPSWorldWeapon* Weapon : SpawnedWeapons)
+    {
+        if (IsValid(Weapon)) Weapon->Destroy();
+    }
+    SpawnedWeapons.Reset();
+
+    static const TCHAR* AttributeRestoreOrder[] = {
+        TEXT("MaxHealth"), TEXT("Health"), TEXT("Armor"),
+        TEXT("MovementSpeed"), TEXT("Stamina"),
+    };
+    for (const TCHAR* Name : AttributeRestoreOrder)
+    {
+        if (const float* Value = PlaytestAttributeSnapshot.Find(Name))
+        {
+            SetAttribute(Name, *Value);
+        }
+    }
+    PlaytestAttributeSnapshot.Reset();
+
+    const TMap<FString, float> RulesToRestore = PlaytestRuleSnapshot;
+    ResetGameRules();
+    for (const TPair<FString, float>& Pair : RulesToRestore)
+    {
+        SetGameRule(Pair.Key, Pair.Value);
+    }
+    PlaytestRuleSnapshot.Reset();
+    bPlaytestSessionActive = false;
 }
 
 // -----------------------------------------------------------------------
@@ -105,13 +168,30 @@ UFPSCombatAttributeSet* UUGCFunctionBridge::GetCombatAttributes() const
     return nullptr;
 }
 
+bool UUGCFunctionBridge::HasWriteAuthority() const
+{
+    const AActor* OwnerActor = GetOwner();
+    return OwnerActor && OwnerActor->HasAuthority();
+}
+
+bool UUGCFunctionBridge::IsAbilityClassAllowed(TSubclassOf<UFPSGameplayAbility> AbilityClass) const
+{
+    if (!AbilityClass) return false;
+    static const TSet<FString> AllowedPaths = {
+        TEXT("/Game/_FPS/Weapon/BP_GA_WeaponFire.BP_GA_WeaponFire_C"),
+        TEXT("/Game/_FPS/Weapon/BP_GA_WeaponReload.BP_GA_WeaponReload_C"),
+        TEXT("/Game/_FPS/Weapon/BP_GA_WeaponMelee.BP_GA_WeaponMelee_C"),
+    };
+    return AllowedPaths.Contains(AbilityClass->GetPathName());
+}
+
 // -----------------------------------------------------------------------
 // GAS — 技能操作
 // -----------------------------------------------------------------------
 
 bool UUGCFunctionBridge::GrantAbility(TSubclassOf<UFPSGameplayAbility> AbilityClass, int32 Level)
 {
-    if (!AbilityClass) return false;
+    if (!HasWriteAuthority() || !IsAbilityClassAllowed(AbilityClass)) return false;
 
     UAbilitySystemComponent* ASC = GetASC();
     if (!ASC || !ASC->GetOwnerActor()->HasAuthority()) return false;
@@ -131,7 +211,7 @@ bool UUGCFunctionBridge::GrantAbility(TSubclassOf<UFPSGameplayAbility> AbilityCl
 
 bool UUGCFunctionBridge::RemoveAbility(TSubclassOf<UFPSGameplayAbility> AbilityClass)
 {
-    if (!AbilityClass) return false;
+    if (!HasWriteAuthority() || !IsAbilityClassAllowed(AbilityClass)) return false;
 
     UAbilitySystemComponent* ASC = GetASC();
     if (!ASC || !ASC->GetOwnerActor()->HasAuthority()) return false;
@@ -146,7 +226,7 @@ bool UUGCFunctionBridge::RemoveAbility(TSubclassOf<UFPSGameplayAbility> AbilityC
 
 bool UUGCFunctionBridge::ApplyEffect(TSubclassOf<UGameplayEffect> EffectClass, float Magnitude)
 {
-    if (!EffectClass) return false;
+    if (!EffectClass || !HasWriteAuthority()) return false;
 
     UAbilitySystemComponent* ASC = GetASC();
     if (!ASC) return false;
@@ -156,7 +236,10 @@ bool UUGCFunctionBridge::ApplyEffect(TSubclassOf<UGameplayEffect> EffectClass, f
     FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(EffectClass, Magnitude, Ctx);
     if (!Spec.IsValid()) return false;
 
-    return ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get()).IsValid();
+    const FActiveGameplayEffectHandle Handle = ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+    if (!Handle.IsValid()) return false;
+    if (bPlaytestSessionActive) AppliedEffectHandles.Add(Handle);
+    return true;
 }
 
 // -----------------------------------------------------------------------
@@ -165,6 +248,8 @@ bool UUGCFunctionBridge::ApplyEffect(TSubclassOf<UGameplayEffect> EffectClass, f
 
 bool UUGCFunctionBridge::SetAttribute(const FString& AttributeName, float Value)
 {
+    if (!HasWriteAuthority()) return false;
+
     // 白名单检查
     const float* MinPtr = UGCAttributeWhitelist::MinValues.Find(AttributeName);
     const float* MaxPtr = UGCAttributeWhitelist::MaxValues.Find(AttributeName);
@@ -218,8 +303,18 @@ float UUGCFunctionBridge::GetAttribute(const FString& AttributeName) const
 
 AFPSWorldWeapon* UUGCFunctionBridge::SpawnWeapon(const FName& WeaponID, FVector Location)
 {
+    if (!HasWriteAuthority() || WeaponID.IsNone()) return nullptr;
     UWorld* World = GetWorld();
     if (!World) return nullptr;
+
+    UGameInstance* GameInstance = World->GetGameInstance();
+    const UItemDataManager* ItemData = GameInstance ? GameInstance->GetSubsystem<UItemDataManager>() : nullptr;
+    const FItemDefinitionRow* Definition = ItemData ? ItemData->GetItemDefinition(WeaponID) : nullptr;
+    if (!Definition || Definition->ItemType != EItemType::Weapon)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[UGCBridge] SpawnWeapon: invalid or non-weapon ItemID '%s'"), *WeaponID.ToString());
+        return nullptr;
+    }
 
     FActorSpawnParameters Params;
     Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
@@ -235,6 +330,7 @@ AFPSWorldWeapon* UUGCFunctionBridge::SpawnWeapon(const FName& WeaponID, FVector 
     {
         // WeaponItemDefID 对应 DT_ItemDefinition 的行名，用于背包物品创建
         Spawned->WeaponItemDefID = WeaponID;
+        if (bPlaytestSessionActive) SpawnedWeapons.Add(Spawned);
     }
 
     return Spawned;
@@ -244,8 +340,28 @@ AFPSWorldWeapon* UUGCFunctionBridge::SpawnWeapon(const FName& WeaponID, FVector 
 // 游戏规则
 // -----------------------------------------------------------------------
 
+void UUGCFunctionBridge::ResetGameRules()
+{
+    GameRules.Reset();
+    GameRules.Add(TEXT("RoundTime"), 300.f);
+    GameRules.Add(TEXT("RespawnDelay"), 5.f);
+    GameRules.Add(TEXT("FriendlyFire"), 0.f);
+    GameRules.Add(TEXT("GravityScale"), 1.f);
+    if (HasWriteAuthority())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            if (AWorldSettings* WS = World->GetWorldSettings())
+            {
+                WS->WorldGravityZ = -980.f;
+            }
+        }
+    }
+}
+
 bool UUGCFunctionBridge::SetGameRule(const FString& RuleName, float Value)
 {
+    if (!HasWriteAuthority()) return false;
     const float* MinPtr = UGCRuleWhitelist::MinValues.Find(RuleName);
     const float* MaxPtr = UGCRuleWhitelist::MaxValues.Find(RuleName);
     if (!MinPtr || !MaxPtr)
@@ -277,19 +393,4 @@ float UUGCFunctionBridge::GetGameRule(const FString& RuleName) const
     if (!UGCRuleWhitelist::MinValues.Contains(RuleName)) return -1.f;
     const float* Val = GameRules.Find(RuleName);
     return Val ? *Val : -1.f;
-}
-
-// -----------------------------------------------------------------------
-// LLM 统一入口
-// -----------------------------------------------------------------------
-
-FString UUGCFunctionBridge::ExecuteFunction(const FString& FuncName, const FString& ParamsJSON)
-{
-    // 转发给 UGCFunctionRegistry.lua 的 :Call()
-    // 通过 UnLua 调用 Lua 函数
-    // 暂时返回占位，Lua 层对接后替换
-    UE_LOG(LogTemp, Log, TEXT("[UGCBridge] ExecuteFunction: %s(%s)"), *FuncName, *ParamsJSON);
-
-    // TODO: 接入 UnLua 调用 UGCFunctionRegistry:Call(FuncName, ParamsJSON)
-    return FString::Printf(TEXT("{\"ok\":false,\"error\":\"Lua registry not connected yet\"}"));
 }

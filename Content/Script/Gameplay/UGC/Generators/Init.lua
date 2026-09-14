@@ -72,7 +72,7 @@ M._placePoints = _placePoints
 
 function M.Register(name, def)
     if not name or not def or not def.func then
-        print("[Generators] Register 失败：缺少 name/def/func")
+        UGCLog.Error("registry_error", "Register 缺少 name/def/func")
         return
     end
     _gens[name] = def
@@ -102,7 +102,7 @@ end
 
 --- 调用指定生成器，把生成结果落到 SceneData
 --- @return batchID(string) | nil, count(number) | errMsg(string)
-function M:Generate(name, params)
+function M:Generate(name, params, context)
     local def = _gens[name]
     if not def then
         return nil, "未知生成器: " .. tostring(name)
@@ -126,11 +126,21 @@ function M:Generate(name, params)
     if not batchID then
         return nil, "落地失败"
     end
+    if #commands == 0 then return nil, "没有有效的生成点" end
 
-    print(string.format(
-        "[Generators] %s → batch=%s 成功=%d 跳过=%d (无效prefab) 请求点数=%d",
-        name, batchID, successCount, skipCount, #points))
+    local result = SceneData:ExecuteComposite(commands, "Generate " .. tostring(name), context or {source="generator", approved=true})
+    if not result.ok then return nil, result.message end
 
+    local successCount = 0
+    for _, childResult in ipairs(result.data or {}) do
+        if childResult.ok and childResult.data and childResult.data.sceneID then
+            successCount = successCount + 1
+        end
+    end
+    UGCLog.Info("generator_batch", {
+        generator = name, batch = batchID,
+        created = successCount, skipped = skipCount, requested = #points,
+    })
     return batchID, successCount
 end
 
@@ -141,7 +151,7 @@ end
 
 function M:ExportFunctions(targetRegistry)
     if not targetRegistry or not targetRegistry.Register then
-        print("[Generators] ExportFunctions: targetRegistry 不合法")
+        UGCLog.Error("registry_error", "ExportFunctions: targetRegistry 不合法")
         return
     end
     local self_ = self
@@ -150,8 +160,8 @@ function M:ExportFunctions(targetRegistry)
         targetRegistry:Register(funcName, {
             desc   = "[场景生成器] " .. (def.desc or name),
             params = def.params or {},
-            func   = function(p)
-                local batchID, countOrErr = self_:Generate(name, p)
+            func   = function(p, context)
+                local batchID, countOrErr = self_:Generate(name, p, context)
                 if not batchID then
                     return false, "生成失败: " .. tostring(countOrErr)
                 end
@@ -161,9 +171,9 @@ function M:ExportFunctions(targetRegistry)
             end,
         })
     end
-    print(string.format("[Generators] 已导出 %d 个生成器为 LLM 函数", (function()
-        local n = 0; for _ in pairs(_gens) do n = n + 1 end; return n
-    end)()))
+    local exported = 0
+    for _ in pairs(_gens) do exported = exported + 1 end
+    UGCLog.Info("generators_exported", { count = exported })
 end
 
 --============================================================
@@ -441,13 +451,13 @@ end
 local function safeLoad(modPath)
     local ok, mod = pcall(require, modPath)
     if not ok then
-        print("[Generators] 加载失败 " .. modPath .. ": " .. tostring(mod))
+        UGCLog.Error("registry_error", "生成器模块加载失败", { module = modPath, reason = tostring(mod) })
         return
     end
     if type(mod) == "table" and type(mod.Register) == "function" then
         mod.Register(M)
     else
-        print("[Generators] " .. modPath .. " 未导出 Register 函数")
+        UGCLog.Error("registry_error", "生成器模块未导出 Register", { module = modPath })
     end
 end
 

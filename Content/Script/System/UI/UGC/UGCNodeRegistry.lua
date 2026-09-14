@@ -1,10 +1,10 @@
 --[[
     UGCNodeRegistry.lua
-    蓝图节点类型注册表：定义所有可用节点的元数据
-    （标题、颜色、引脚、参数）
+    UI adapter over the shared typed UGCGraphSchema.
 ]]
 
-local R = {}
+local Schema = require("Gameplay.UGC.UGCGraphSchema")
+local R = { Definitions={}, Categories={} }
 
 -- 颜色预设（与 UE 蓝图风格对齐）
 local COLOR_EVENT  = {r=0.63, g=0.06, b=0.06}  -- 红

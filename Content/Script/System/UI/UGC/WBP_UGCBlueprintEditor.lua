@@ -19,6 +19,7 @@
 ]]
 
 local NodeRegistry = require("System.UI.UGC.UGCNodeRegistry")
+local GraphCompiler = require("Gameplay.UGC.UGCGraphCompiler")
 
 local M = UnLua.Class()
 
@@ -31,6 +32,8 @@ local M = UnLua.Class()
 -- programID = "actor_prog_{id}"   → 单个 Actor 的图
 local _graphs   = {}
 local _activeID = "level_main"
+-- Current graph view cache only. Never serialize or store these UObject references in _graphs.
+local _nodeViews = {}
 
 local function getG()
     local g = _graphs[_activeID]
@@ -120,7 +123,6 @@ end
 function M:BuildNodeLib()
     if not self.w_scroll_nodeLib then Warn("缺少 w_scroll_nodeLib"); return end
     self.w_scroll_nodeLib:ClearChildren()
-    collectgarbage("collect")   -- 清掉 ClearChildren 产生的孤儿 userdata，再 Create 新按钮
 
     local pc  = self:GetOwningPlayer()
     local cls = getNodeLibBtnClass()
@@ -263,8 +265,8 @@ function M:PlaceNode(canvasX, canvasY, nodeType)
     end
 
     widget:SetVisibility(UE.ESlateVisibility.Visible)
-    nodeData.widget = widget
-    g.nodes[id]     = nodeData
+    g.nodes[id] = nodeData
+    _nodeViews[id] = { widget = widget, canvasSlot = nil }
 
     -- 优先 AddChildToCanvas（返回已有 slot），回退 AddChild + SlotAsCanvasSlot
     local slot = nil
@@ -283,7 +285,7 @@ function M:PlaceNode(canvasX, canvasY, nodeType)
         slot:SetAutoSize(true)
         slot:SetAlignment(UE.FVector2D(0.5, 0.5))
         slot:SetPosition(UE.FVector2D(px, py))
-        nodeData.canvasSlot = slot   -- 缓存 slot，MoveNodeTo 直接复用，避免二次 SlotAsCanvasSlot 失败
+        _nodeViews[id].canvasSlot = slot
         Log(string.format("SetPosition %.1f,%.1f", px, py))
     else
         Warn("PlaceNode: 未获取到 CanvasSlot，节点可能不可见")
@@ -320,35 +322,15 @@ function M:OpenGraph(programID, title, graphData)
     _dragNodeID    = nil
     _isDirtyWires  = false
 
-    -- ★ 关键：在切换 _activeID 之前，先显式 RemoveFromParent 旧图所有 widget。
-    --   这样旧 widget 的 UnLua 绑定立即释放，不会留给 Lua GC 在后续
-    --   UWidgetBlueprintLibrary.Create 的内存分配时机触发 __gc 修改对象图。
-    local oldG = _graphs[_activeID]
-    if oldG then
-        for _, node in pairs(oldG.nodes) do
-            if node.widget then
-                -- IsValid 检查：UE GC 可能已回收（编辑器关闭后 _graphs 模块变量残留引用）
-                local ok = pcall(function()
-                    if UE.UKismetSystemLibrary.IsValid(node.widget) then
-                        node.widget:RemoveFromParent()
-                    end
-                end)
-                if not ok then
-                    Log("RemoveFromParent 失败（widget 已失效），跳过")
-                end
-                node.widget      = nil
-                node.canvasSlot  = nil   -- 同步清除缓存的 slot 引用，防止下次 OpenGraph 访问死亡 UObject
-            end
+    -- View cache is instance-lifetime state. The graph document stays pure and
+    -- never retains Widget/CanvasSlot UObject references.
+    for _, view in pairs(_nodeViews) do
+        if view.widget and UE.UKismetSystemLibrary.IsValid(view.widget) then
+            view.widget:RemoveFromParent()
         end
     end
-    if self.w_canvas_main then
-        self.w_canvas_main:ClearChildren()
-    end
-
-    -- 旧 widget 已全部 nil / RemoveFromParent，强制 GC 立即回收孤儿 userdata，
-    -- 防止其 __gc(RemoveObject) 在随后 Create 的内存分配里触发，
-    -- 与 TryBind(AddObject) 并发修改 UnLua 对象图导致崩溃
-    collectgarbage("collect")
+    _nodeViews = {}
+    if self.w_canvas_main then self.w_canvas_main:ClearChildren() end
 
     if self.w_wire_overlay then
         self.w_wire_overlay:BeginWireUpdate()
@@ -393,11 +375,10 @@ function M:OpenGraph(programID, title, graphData)
             for _, nodeData in pairs(getG().nodes) do
                 local widget = UE.UWidgetBlueprintLibrary.Create(pc, cls, pc)
                 if widget then
-                    nodeData.widget = widget
                     self.w_canvas_main:AddChild(widget)
                     local slot = UE.UWidgetLayoutLibrary.SlotAsCanvasSlot(widget)
+                    _nodeViews[nodeData.id] = { widget = widget, canvasSlot = slot }
                     if slot then
-                        nodeData.canvasSlot = slot   -- 缓存供 MoveNodeTo 使用
                         slot:SetAutoSize(true)
                         slot:SetAlignment(UE.FVector2D(0.5, 0.5))
                         slot:SetPosition(UE.FVector2D(
@@ -568,9 +549,11 @@ function M:UpdateWires(mouseAbsX, mouseAbsY)
     for _, conn in ipairs(g.connections) do
         local fromNode = g.nodes[conn.from_id]
         local toNode   = g.nodes[conn.to_id]
-        if fromNode and fromNode.widget and toNode and toNode.widget then
-            local fromRow = fromNode.widget:GetPinRow(conn.from_pin)
-            local toRow   = toNode.widget:GetPinRow(conn.to_pin)
+        local fromView = fromNode and _nodeViews[fromNode.id]
+        local toView = toNode and _nodeViews[toNode.id]
+        if fromView and fromView.widget and toView and toView.widget then
+            local fromRow = fromView.widget:GetPinRow(conn.from_pin)
+            local toRow   = toView.widget:GetPinRow(conn.to_pin)
             if fromRow and toRow then
                 local startAbs = fromRow:GetPinOutAbsPos()
                 local endAbs   = toRow:GetPinInAbsPos()
@@ -588,8 +571,9 @@ function M:UpdateWires(mouseAbsX, mouseAbsY)
 
     if _pendingPin then
         local fromNode = g.nodes[_pendingPin.nodeID]
-        if fromNode and fromNode.widget then
-            local row = fromNode.widget:GetPinRow(_pendingPin.pinName)
+        local fromView = fromNode and _nodeViews[fromNode.id]
+        if fromView and fromView.widget then
+            local row = fromView.widget:GetPinRow(_pendingPin.pinName)
             if row then
                 local pinAbs = _pendingPin.isOutput
                     and row:GetPinOutAbsPos()
@@ -646,18 +630,18 @@ end
 
 function M:MoveNodeTo(nodeID, cx, cy)
     local node = getG().nodes[nodeID]
-    if not node or not node.widget then
-        Warn("MoveNodeTo: 找不到节点或 widget 为空: " .. tostring(nodeID))
+    local view = _nodeViews[nodeID]
+    if not node or not view or not view.widget then
+        Warn("MoveNodeTo: 找不到节点 View: " .. tostring(nodeID))
         return
     end
     node.pos.x = cx
     node.pos.y = cy
-    -- 优先用 PlaceNode / OpenGraph 缓存的 slot；若无则重新获取并缓存
-    local slot = node.canvasSlot
+    local slot = view.canvasSlot
     if not slot then
-        slot = UE.UWidgetLayoutLibrary.SlotAsCanvasSlot(node.widget)
+        slot = UE.UWidgetLayoutLibrary.SlotAsCanvasSlot(view.widget)
         if slot then
-            node.canvasSlot = slot
+            view.canvasSlot = slot
         else
             Warn("MoveNodeTo: SlotAsCanvasSlot 返回 nil，节点 " .. nodeID .. " 无法移动")
             return
@@ -674,13 +658,10 @@ end
 function M:OnClickClose()
     self:SaveCurrentGraphToSceneData()
 
-    -- 关闭前清空所有图里的 widget 引用，防止 _graphs 模块变量持有已回收 UObject，
-    -- 导致下次 OpenGraph 调用 RemoveFromParent 时 UnLua 访问死亡对象卡死
-    for _, g in pairs(_graphs) do
-        for _, node in pairs(g.nodes) do
-            node.widget = nil
-        end
+    for _, view in pairs(_nodeViews) do
+        if view.widget and UE.UKismetSystemLibrary.IsValid(view.widget) then view.widget:RemoveFromParent() end
     end
+    _nodeViews = {}
     if self.w_canvas_main then self.w_canvas_main:ClearChildren() end
 
     local UIManager = require("Gameplay.Core.UIManager")
@@ -690,106 +671,22 @@ function M:OnClickClose()
 end
 
 function M:OnClickCompile()
-    local g      = getG()
-    local nodes  = g.nodes
-    local conns  = g.connections
+    local graph = self:GetCurrentGraphData()
+    local report = GraphCompiler:Compile(graph)
+    local status = GraphCompiler:FormatReport(report)
 
-    -- 节点总数
-    local nodeCount = 0
-    for _ in pairs(nodes) do nodeCount = nodeCount + 1 end
-
-    if nodeCount == 0 then
-        self:SetStatus("编译: 空图（无节点）")
-        return
-    end
-
-    local errors   = {}
-    local warnings = {}
-
-    -- ① 找事件节点（执行入口）
-    local eventNodes = {}
-    for id, n in pairs(nodes) do
-        local def = NodeRegistry.Definitions[n.type]
-        if def and def.category == "事件" then
-            table.insert(eventNodes, id)
+    if report.ok then
+        self:SaveCurrentGraphToSceneData()
+        local ok, Runner = pcall(require, "Gameplay.UGC.UGCProgramRunner")
+        if ok and Runner and Runner.InvalidateProgram then
+            Runner:InvalidateProgram(_activeID)
+            Runner:CompileProgram(_activeID)
         end
-    end
-    if #eventNodes == 0 then
-        table.insert(errors, "没有事件节点（图缺少执行入口）")
-    end
-
-    -- ② 建连线索引，BFS 找从事件节点可达的节点
-    local connOut = {}  -- [fromID][fromPin] = toID
-    for _, c in ipairs(conns) do
-        if not connOut[c.from_id] then connOut[c.from_id] = {} end
-        connOut[c.from_id][c.from_pin] = c.to_id
-    end
-
-    local reachable = {}
-    local queue     = {}
-    for _, eid in ipairs(eventNodes) do
-        if not reachable[eid] then
-            reachable[eid] = true
-            table.insert(queue, eid)
-        end
-    end
-    local head = 1
-    while head <= #queue do
-        local cur = queue[head]; head = head + 1
-        local outs = connOut[cur]
-        if outs then
-            for _, toID in pairs(outs) do
-                if not reachable[toID] then
-                    reachable[toID] = true
-                    table.insert(queue, toID)
-                end
-            end
-        end
-    end
-
-    -- ③ 孤立节点警告（事件节点本身不算孤立）
-    for id, n in pairs(nodes) do
-        if not reachable[id] then
-            local def   = NodeRegistry.Definitions[n.type]
-            local label = (def and def.label) or n.type
-            table.insert(warnings, "孤立节点: " .. label .. " (" .. id .. ")")
-        end
-    end
-
-    -- ④ Branch 节点：条件引用合法性
-    for id, n in pairs(nodes) do
-        if n.type == "Branch" then
-            local condID = (n.params or {}).condition_node or ""
-            if condID == "" then
-                table.insert(errors, "Branch (" .. id .. "): 未指定 condition_node")
-            elseif not nodes[condID] then
-                table.insert(errors,
-                    "Branch (" .. id .. "): 条件节点 " .. condID .. " 不存在")
-            end
-        end
-    end
-
-    -- ⑤ 汇报
-    if #errors > 0 then
-        local summary = errors[1]
-        if #errors > 1 then
-            summary = summary .. string.format("…（共 %d 个错误）", #errors)
-        end
-        self:SetStatus("编译错误: " .. summary)
-        Log(string.format("编译失败 %d 错误 %d 警告", #errors, #warnings))
-    elseif #warnings > 0 then
-        local summary = warnings[1]
-        if #warnings > 1 then
-            summary = summary .. string.format("…（共 %d 个警告）", #warnings)
-        end
-        self:SetStatus(string.format("编译通过（%d 节点，%d 警告）: %s",
-            nodeCount, #warnings, summary))
-        Log(string.format("编译通过 0 错误 %d 警告", #warnings))
+        self:SetStatus(status)
+        Log(status)
     else
-        self:SetStatus(string.format(
-            "编译成功 — %d 节点，%d 个事件入口",
-            nodeCount, #eventNodes))
-        Log(string.format("编译成功 %d 节点", nodeCount))
+        self:SetStatus(status)
+        Warn(status)
     end
 end
 
@@ -804,18 +701,15 @@ end
 
 function M:OnClickClear()
     local g = getG()
-    for _, node in pairs(g.nodes) do
-        if node.widget then
-            node.widget:RemoveFromParent()
-            node.widget = nil
-        end
+    for _, view in pairs(_nodeViews) do
+        if view.widget and UE.UKismetSystemLibrary.IsValid(view.widget) then view.widget:RemoveFromParent() end
     end
+    _nodeViews = {}
     g.nodes       = {}
     g.connections = {}
     g.nextID      = 1
     _pendingPin   = nil
     _isDirtyWires = false
-    collectgarbage("collect")   -- 清掉 RemoveFromParent 后的孤儿 userdata
     if self.w_wire_overlay then
         self.w_wire_overlay:BeginWireUpdate()
         self.w_wire_overlay:EndWireUpdate()

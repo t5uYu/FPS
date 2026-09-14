@@ -17,6 +17,10 @@
         Registry:GetSchemas()  -- 返回 JSON 字符串
 ]]
 
+local json = require("Util.json")
+local Log = require("Gameplay.UGC.UGCLog")
+local Policy = require("Gameplay.UGC.UGCCapabilityPolicy")
+
 local Registry = {}
 Registry.__index = Registry
 
@@ -87,16 +91,47 @@ function Registry:Init(playerController)
     _bridge = playerController:GetUGCBridge()
     _funcs  = {}
     self:RegisterAll()
-    print("[UGCRegistry] 初始化完成，已注册函数数量: " .. self:Count())
+
+    local SceneData = require("Gameplay.UGC.UGCSceneData")
+    SceneData:RegisterWorldRuleAdapter(
+        function(rule, value) return _bridge:SetGameRule(rule, value) end,
+        function(rule) return _bridge:GetGameRule(rule) end,
+        function() _bridge:ResetGameRules() end)
+
+    SceneData:RegisterExternalAdapter("pcg", function(record)
+        local pcgBridge = _pc and _pc:GetUGCPCGBridge() or nil
+        if not pcgBridge then return false, "PCG Bridge 组件不可用" end
+        local md = record.metadata or {}
+        local actor = pcgBridge:Generate(
+            UE.FVector(tonumber(md.x) or 0, tonumber(md.y) or 0, tonumber(md.z) or 0),
+            tonumber(md.radius) or 0,
+            tonumber(md.seed) or 0,
+            "")
+        if not actor then return false, "PCG 重放失败" end
+        SceneData:AttachExternalActor(record.sceneID, actor)
+        return true
+    end, function(actor)
+        local pcgBridge = _pc and _pc:GetUGCPCGBridge() or nil
+        if not pcgBridge then return false, "PCG Bridge 组件不可用" end
+        return pcgBridge:Cleanup(actor), "PCG 清理失败"
+    end)
+    Log.Info("registry_initialized", { functions = self:Count() })
 end
 
 --============================================================
 -- 注册单个函数
 --============================================================
 
+local function defaultRisk(name)
+    if name:match("^get_") or name:match("^list_") then return "read" end
+    if name:match("^delete_") or name:match("^remove_") or name == "pcg_clear" then return "high" end
+    return "write"
+end
+
 function Registry:Register(name, def)
-    -- def = { desc, params, func }
-    -- params = { { name, type, desc, required } }
+    -- def = { desc, params, func, risk }
+    -- risk = read | write | high
+    def.risk = def.risk or defaultRisk(name)
     _funcs[name] = def
 end
 
@@ -111,9 +146,10 @@ function Registry:RegisterAll()
     -- --------------------------------------------------------
 
     self:Register("set_attribute", {
+        requiresPlaytest = true,
         desc = "设置角色属性值。可修改的属性：Health（生命值）、MaxHealth（最大生命值）、Armor（护甲）、MovementSpeed（移速）、Stamina（体力）",
         params = {
-            { name = "attribute", type = "string",  desc = "属性名，可选：Health / MaxHealth / Armor / MovementSpeed / Stamina", required = true },
+            { name = "attribute", type = "string", enum = Policy.Attributes, desc = "属性名，可选：Health / MaxHealth / Armor / MovementSpeed / Stamina", required = true },
             { name = "value",     type = "number",  desc = "目标数值", required = true },
         },
         func = function(p)
@@ -126,9 +162,10 @@ function Registry:RegisterAll()
     })
 
     self:Register("get_attribute", {
+        requiresPlaytest = true,
         desc = "读取角色当前属性值",
         params = {
-            { name = "attribute", type = "string", desc = "属性名，可选：Health / MaxHealth / Armor / MovementSpeed / Stamina", required = true },
+            { name = "attribute", type = "string", enum = Policy.Attributes, desc = "属性名，可选：Health / MaxHealth / Armor / MovementSpeed / Stamina", required = true },
         },
         func = function(p)
             if not p.attribute then return false, "缺少参数 attribute" end
@@ -143,32 +180,38 @@ function Registry:RegisterAll()
     -- --------------------------------------------------------
 
     self:Register("grant_ability", {
-        desc = "动态授予角色一个 GAS 技能。技能类需在白名单内（BlueprintClass 路径）",
+        requiresPlaytest = true,
+        desc = "动态授予角色一个已审核的 GAS 技能。只接受 ability_id 白名单。",
+        risk = "high",
         params = {
-            { name = "ability_path", type = "string", desc = "技能蓝图类路径，如 /Game/_FPS/GAS/GA_FireBall", required = true },
-            { name = "level",        type = "number", desc = "技能等级，默认 1", required = false },
+            { name = "ability_id", type = "string", enum = Policy.AbilityIDs, desc = "技能 ID：WeaponFire / WeaponReload / WeaponMelee", required = true },
+            { name = "level", type = "number", min = 1, max = 10, desc = "技能等级，1-10，默认 1", required = false },
         },
         func = function(p)
-            if not p.ability_path then return false, "缺少参数 ability_path" end
-            local cls = UE.UClass.Load(tostring(p.ability_path))
-            if not cls then return false, "找不到技能类: " .. tostring(p.ability_path) end
-            local level = tonumber(p.level) or 1
+            local path = Policy.AbilityPaths[tostring(p.ability_id)]
+            if not path then return false, "技能不在允许列表" end
+            local cls = UE.UClass.Load(path)
+            if not cls then return false, "白名单技能资产不可用: " .. tostring(p.ability_id) end
+            local level = math.max(1, math.min(10, tonumber(p.level) or 1))
             local ok = _bridge:GrantAbility(cls, level)
-            return ok, ok and "技能授予成功" or "授予失败（可能已存在或非法类型）"
+            return ok, ok and "技能授予成功" or "授予失败（需要服务端权限和 FPS Character）"
         end
     })
 
     self:Register("remove_ability", {
-        desc = "移除角色身上指定技能",
+        requiresPlaytest = true,
+        desc = "移除角色身上由 UGC 授予的白名单技能",
+        risk = "high",
         params = {
-            { name = "ability_path", type = "string", desc = "技能蓝图类路径", required = true },
+            { name = "ability_id", type = "string", enum = Policy.AbilityIDs, desc = "技能 ID：WeaponFire / WeaponReload / WeaponMelee", required = true },
         },
         func = function(p)
-            if not p.ability_path then return false, "缺少参数 ability_path" end
-            local cls = UE.UClass.Load(tostring(p.ability_path))
-            if not cls then return false, "找不到技能类: " .. tostring(p.ability_path) end
+            local path = Policy.AbilityPaths[tostring(p.ability_id)]
+            if not path then return false, "技能不在允许列表" end
+            local cls = UE.UClass.Load(path)
+            if not cls then return false, "白名单技能资产不可用: " .. tostring(p.ability_id) end
             local ok = _bridge:RemoveAbility(cls)
-            return ok, ok and "技能移除成功" or "移除失败（技能不存在）"
+            return ok, ok and "技能移除成功" or "移除失败（技能不存在或无服务端权限）"
         end
     })
 
@@ -177,9 +220,10 @@ function Registry:RegisterAll()
     -- --------------------------------------------------------
 
     self:Register("spawn_weapon", {
-        desc = "在指定位置生成一把武器拾取物。WeaponID 对应 DT_ItemDefinition 中的行名",
+        requiresPlaytest = true,
+        desc = "在指定位置生成一把审核过的武器拾取物。",
         params = {
-            { name = "weapon_id", type = "string", desc = "武器 ID，如 AK47、Glock", required = true },
+            { name = "weapon_id", type = "string", enum = Policy.Weapons, desc = "武器 ID：WPN_Rifle_AK47 / WPN_Pistol_Glock", required = true },
             { name = "x",         type = "number", desc = "世界坐标 X（cm）", required = true },
             { name = "y",         type = "number", desc = "世界坐标 Y（cm）", required = true },
             { name = "z",         type = "number", desc = "世界坐标 Z（cm），默认 0", required = false },
@@ -201,24 +245,26 @@ function Registry:RegisterAll()
     self:Register("set_rule", {
         desc = "设置游戏规则参数。可修改：RoundTime（回合时长秒）、RespawnDelay（复活延迟秒）、FriendlyFire（友伤 0/1）、GravityScale（重力倍率）",
         params = {
-            { name = "rule",  type = "string", desc = "规则名，可选：RoundTime / RespawnDelay / FriendlyFire / GravityScale", required = true },
+            { name = "rule", type = "string", enum = Policy.Rules, desc = "规则名，可选：RoundTime / RespawnDelay / FriendlyFire / GravityScale", required = true },
             { name = "value", type = "number", desc = "目标值", required = true },
         },
-        func = function(p)
+        func = function(p, context)
             if not p.rule or p.value == nil then return false, "缺少参数 rule 或 value" end
-            local ok = _bridge:SetGameRule(tostring(p.rule), tonumber(p.value))
-            return ok, ok and "规则设置成功" or "规则名不合法或超出范围"
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local result = SceneData:SetWorldRule(tostring(p.rule), tonumber(p.value), context)
+            return result.ok, result.ok and "规则设置成功" or result.message
         end
     })
 
     self:Register("get_rule", {
         desc = "读取当前游戏规则值",
         params = {
-            { name = "rule", type = "string", desc = "规则名，可选：RoundTime / RespawnDelay / FriendlyFire / GravityScale", required = true },
+            { name = "rule", type = "string", enum = Policy.Rules, desc = "规则名，可选：RoundTime / RespawnDelay / FriendlyFire / GravityScale", required = true },
         },
         func = function(p)
             if not p.rule then return false, "缺少参数 rule" end
-            local val = _bridge:GetGameRule(tostring(p.rule))
+            local SceneData = require("Gameplay.UGC.UGCSceneData")
+            local val = SceneData:GetWorldRule(tostring(p.rule))
             if val < 0 then return false, "规则名不合法" end
             return true, val
         end
@@ -238,7 +284,7 @@ function Registry:RegisterAll()
             return "在场景中放置一个预制体 Actor。可用预制体：Box、Sphere、Cylinder、Ramp、SpawnPoint、ExtractionZone、TriggerZone、WeaponSpawn"
         end)(),
         params = {
-            { name = "prefab", type = "string", desc = "预制体名称，区分大小写", required = true },
+            { name = "prefab", type = "string", enum = require("Gameplay.UGC.UGCPrefabRegistry").ListIDs(), desc = "预制体名称，区分大小写", required = true },
             { name = "x",      type = "number", desc = "世界坐标 X（cm）",      required = true },
             { name = "y",      type = "number", desc = "世界坐标 Y（cm）",      required = true },
             { name = "z",      type = "number", desc = "世界坐标 Z（cm），默认 0", required = false },
@@ -249,23 +295,22 @@ function Registry:RegisterAll()
             { name = "scale_y", type = "number", desc = "Y 轴缩放倍率，默认 1", required = false },
             { name = "scale_z", type = "number", desc = "Z 轴缩放倍率，默认 1", required = false },
         },
-        func = function(p)
+        func = function(p, context)
             if not p.prefab or p.x == nil or p.y == nil then
                 return false, "缺少参数 prefab / x / y"
             end
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            local loc   = UE.FVector(tonumber(p.x), tonumber(p.y), tonumber(p.z) or 0)
-            local rot   = UE.FRotator(tonumber(p.pitch) or 0, tonumber(p.yaw) or 0, tonumber(p.roll) or 0)
-            local scale = UE.FVector(tonumber(p.scale_x) or 1, tonumber(p.scale_y) or 1, tonumber(p.scale_z) or 1)
-            local transform = UE.UKismetMathLibrary.MakeTransform(loc, rot, scale)
-            local sceneID, actor = SceneData:CreateActorWithTransform(tostring(p.prefab), transform)
-            if not sceneID then
-                -- fallback: 尝试旧接口（2026-04-16 兼容）
-                sceneID, actor = SceneData:CreateActor(tostring(p.prefab), loc)
-            end
-            if not sceneID then
-                return false, "放置失败，预制体名称可能不合法或场景已满"
-            end
+            local result = SceneData:ExecuteCommand({
+                type="CreateEntity",
+                prefabName=tostring(p.prefab),
+                transform={
+                    tonumber(p.x), tonumber(p.y), tonumber(p.z) or 0,
+                    tonumber(p.pitch) or 0, tonumber(p.yaw) or 0, tonumber(p.roll) or 0,
+                    tonumber(p.scale_x) or 1, tonumber(p.scale_y) or 1, tonumber(p.scale_z) or 1,
+                },
+            }, context)
+            if not result.ok then return false, result.message end
+            local sceneID = result.data.sceneID
             return true, string.format("已放置 %s，场景 ID=%d，坐标=(%.0f,%.0f,%.0f) 旋转=(%.0f,%.0f,%.0f) 缩放=(%.1f,%.1f,%.1f)",
                 p.prefab, sceneID, p.x, p.y, tonumber(p.z) or 0,
                 tonumber(p.pitch) or 0, tonumber(p.yaw) or 0, tonumber(p.roll) or 0,
@@ -281,7 +326,7 @@ function Registry:RegisterAll()
             { name = "y",        type = "number", desc = "目标坐标 Y（cm）",       required = true },
             { name = "z",        type = "number", desc = "目标坐标 Z（cm）",       required = false },
         },
-        func = function(p)
+        func = function(p, context)
             if p.scene_id == nil or p.x == nil or p.y == nil then
                 return false, "缺少参数 scene_id / x / y"
             end
@@ -290,19 +335,13 @@ function Registry:RegisterAll()
             if not entry then
                 return false, "找不到 scene_id=" .. tostring(p.scene_id)
             end
-            -- 保留原有的 rotation 和 scale（2026-04-16 修复：不再重置为默认值）
-            local EditorBridge = require("Gameplay.UGC.UGCEditorCore"):GetBridge()
-            local origRot   = UE.FRotator(0, 0, 0)
-            local origScale = UE.FVector(1, 1, 1)
-            if EditorBridge and entry.actor then
-                local origT = EditorBridge:GetActorTransform(entry.actor)
-                local _, r, s = UE.UKismetMathLibrary.BreakTransform(origT)
-                origRot   = r
-                origScale = s
-            end
-            local loc = UE.FVector(tonumber(p.x), tonumber(p.y), tonumber(p.z) or 0)
-            local newT = UE.UKismetMathLibrary.MakeTransform(loc, origRot, origScale)
-            local ok = SceneData:ModifyActor(tonumber(p.scene_id), newT)
+            local transform = {}
+            for i = 1, 9 do transform[i] = tonumber(entry.transform[i]) or (i >= 7 and 1 or 0) end
+            transform[1], transform[2], transform[3] = tonumber(p.x), tonumber(p.y), tonumber(p.z) or 0
+            local result = SceneData:ExecuteCommand({
+                type="SetTransform", sceneID=tonumber(p.scene_id), transform=transform,
+            }, context)
+            local ok = result.ok
             return ok, ok and string.format("Actor %d 已移动到 (%.0f,%.0f,%.0f)",
                 p.scene_id, p.x, p.y, tonumber(p.z) or 0) or "移动失败"
         end
@@ -313,10 +352,10 @@ function Registry:RegisterAll()
         params = {
             { name = "scene_id", type = "number", desc = "Actor 的场景 ID（整数）", required = true },
         },
-        func = function(p)
+        func = function(p, context)
             if p.scene_id == nil then return false, "缺少参数 scene_id" end
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            local ok = SceneData:DeleteActor(tonumber(p.scene_id))
+            local ok = SceneData:DeleteActor(tonumber(p.scene_id), context)
             return ok, ok and "Actor " .. tostring(p.scene_id) .. " 已删除" or "删除失败，ID 不存在"
         end
     })
@@ -326,15 +365,10 @@ function Registry:RegisterAll()
         params = {},
         func = function(p)
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            local EditorBridge = require("Gameplay.UGC.UGCEditorCore"):GetBridge()
             local lines = {}
             SceneData:ForEach(function(entry)
-                local x, y, z = 0, 0, 0
-                if EditorBridge and entry.actor then
-                    local t = EditorBridge:GetActorTransform(entry.actor)
-                    local loc, _, _ = UE.UKismetMathLibrary.BreakTransform(t)
-                    x, y, z = loc.X, loc.Y, loc.Z
-                end
+                local transform = entry.transform or {}
+                local x, y, z = tonumber(transform[1]) or 0, tonumber(transform[2]) or 0, tonumber(transform[3]) or 0
                 table.insert(lines, string.format("ID=%d prefab=%s pos=(%.0f,%.0f,%.0f)",
                     entry.sceneID, tostring(entry.prefabName), x, y, z))
             end)
@@ -354,37 +388,23 @@ function Registry:RegisterAll()
             { name = "y",      type = "number", desc = "生成中心 Y 坐标（cm）", required = true },
             { name = "z",      type = "number", desc = "生成中心 Z 坐标（cm），默认 0", required = false },
             { name = "radius", type = "number", desc = "生成半径（cm），默认 1000", required = false },
-            { name = "seed",   type = "number", desc = "随机种子，0 = 随机", required = false },
-            { name = "graph_path", type = "string", desc = "PCG Graph 资产路径，空 = 使用默认", required = false },
+            { name = "seed", type = "number", desc = "随机种子，0 = 随机", required = false },
         },
-        func = function(p)
+        func = function(p, context)
             if p.x == nil or p.y == nil then
                 return false, "缺少参数 x / y"
             end
-            local pcgBridge = _pc:GetUGCPCGBridge()
-            if not pcgBridge then
-                return false, "PCG Bridge 组件不可用"
-            end
             local x, y, z = tonumber(p.x), tonumber(p.y), tonumber(p.z) or 0
-            local loc = UE.FVector(x, y, z)
             local radius = tonumber(p.radius) or 0
             local seed = tonumber(p.seed) or 0
-            local graphPath = tostring(p.graph_path or "")
-            local actor = pcgBridge:Generate(loc, radius, seed, graphPath)
-            if not actor then
-                return false, "PCG 生成失败，请检查 PCG Graph 配置"
-            end
-            -- 登记到 SceneData，让保存/加载和场景清空能感知 PCG 生成物
+            if seed == 0 then seed = math.random(1, 999999) end
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            local sceneID = SceneData:RegisterExternalActor(actor, "PCG_Generated", {
-                kind       = "pcg",
-                x          = x,
-                y          = y,
-                z          = z,
-                radius     = radius,
-                seed       = seed,
-                graph_path = graphPath,
-            })
+            local sceneID, createError = SceneData:CreateExternalEntity(
+                "PCG_Generated", {x, y, z, 0, 0, 0, 1, 1, 1}, {
+                    kind="pcg", x=x, y=y, z=z, radius=radius,
+                    seed=seed,
+                }, nil, context)
+            if not sceneID then return false, createError or "PCG 生成失败" end
             return true, string.format("PCG 生成完成 SceneID=%s 中心=(%.0f,%.0f,%.0f) 半径=%.0f",
                 tostring(sceneID), x, y, z, radius > 0 and radius or 1000)
         end
@@ -393,16 +413,10 @@ function Registry:RegisterAll()
     self:Register("pcg_clear", {
         desc = "清除所有 PCG 过程化生成的内容",
         params = {},
-        func = function(p)
-            local pcgBridge = _pc:GetUGCPCGBridge()
-            if not pcgBridge then
-                return false, "PCG Bridge 组件不可用"
-            end
-            local count = pcgBridge:GetActiveCount()
-            pcgBridge:CleanupAll()
-            -- 同步移除 SceneData 中的 PCG 条目（Actor 已被 Bridge 销毁）
+        func = function(p, context)
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            SceneData:UnregisterExternalByKind("pcg")
+            local count, deleteError = SceneData:DeleteExternalByKind("pcg", context)
+            if deleteError then return false, deleteError end
             return true, "已清除 " .. count .. " 个 PCG 生成组"
         end
     })
@@ -437,10 +451,10 @@ function Registry:RegisterAll()
         params = {
             { name="batch_id", type="string", desc="generate_xxx 返回结果中的 batch_id", required=true },
         },
-        func = function(p)
+        func = function(p, context)
             if not p.batch_id then return false, "缺少 batch_id" end
             local SceneData = require("Gameplay.UGC.UGCSceneData")
-            local n = SceneData:DeleteBatch(tostring(p.batch_id))
+            local n = SceneData:DeleteBatch(tostring(p.batch_id), context)
             return true, string.format("已删除 batch %s，共 %d 个 Actor", p.batch_id, n)
         end
     })
@@ -593,23 +607,132 @@ end
 -- 执行函数
 --============================================================
 
-function Registry:Call(name, params)
-    local def = _funcs[name]
-    if not def then
-        print("[UGCRegistry] 未知函数: " .. tostring(name))
-        return false, "未知函数: " .. tostring(name)
+local function validateValue(param, value)
+    if value == nil then
+        return not param.required, "缺少参数 " .. tostring(param.name)
     end
-    if not _bridge then
-        print("[UGCRegistry] Bridge 未初始化")
-        return false, "Bridge 未初始化"
+    if param.type == "number" then
+        local number = tonumber(value)
+        if number == nil then return false, "参数 " .. tostring(param.name) .. " 必须是 number" end
+        if param.min and number < param.min then return false, "参数 " .. tostring(param.name) .. " 小于最小值" end
+        if param.max and number > param.max then return false, "参数 " .. tostring(param.name) .. " 超过最大值" end
     end
+    if param.type == "boolean" and type(value) ~= "boolean" then
+        return false, "参数 " .. tostring(param.name) .. " 必须是 boolean"
+    end
+    if param.type == "string" and type(value) ~= "string" then
+        return false, "参数 " .. tostring(param.name) .. " 必须是 string"
+    end
+    if param.enum then
+        local allowed = false
+        for _, candidate in ipairs(param.enum) do
+            if value == candidate then allowed = true; break end
+        end
+        if not allowed then return false, "参数 " .. tostring(param.name) .. " 不在允许列表" end
+    end
+    return true
+end
 
-    local ok, r1, r2 = pcall(def.func, params or {})
+function Registry:ValidateCall(name, params, context, options)
+    local def = _funcs[name]
+    if not def then return false, "未知函数: " .. tostring(name) end
+    params = params or {}
+    context = context or { source="local" }
+    options = options or {}
+    if def.requiresPlaytest then
+        local EditorCore = require("Gameplay.UGC.UGCEditorCore")
+        if EditorCore:GetState() ~= "Play" then return false, "该能力只能在试玩模式使用" end
+    end
+    local declared = {}
+    for _, param in ipairs(def.params or {}) do
+        declared[param.name] = true
+        local ok, err = validateValue(param, params[param.name])
+        if not ok then return false, err end
+    end
+    for key in pairs(params) do
+        if not declared[key] then return false, "未知参数: " .. tostring(key) end
+    end
+    if def.validate then
+        local ok, err = def.validate(params, context)
+        if not ok then return false, err or "函数参数校验失败" end
+    end
+    if context.source == "ai" and def.risk ~= "read" and not context.approved and not options.ignoreApproval then
+        return false, "approval_required"
+    end
+    return true
+end
+
+function Registry:Call(name, params, context)
+    context = context or { source="local", approved=true }
+    local valid, validationError = self:ValidateCall(name, params, context)
+    if not valid then
+        return false, validationError
+    end
+    if not _bridge then return false, "Bridge 未初始化" end
+
+    local def = _funcs[name]
+    local ok, r1, r2 = pcall(def.func, params or {}, context)
     if not ok then
-        print("[UGCRegistry] 执行出错: " .. tostring(r1))
+        Log.Error("registry_error", r1)
         return false, "执行异常: " .. tostring(r1)
     end
     return r1, r2
+end
+
+function Registry:BuildProposal(calls)
+    local SceneData = require("Gameplay.UGC.UGCSceneData")
+    local proposal = { calls={}, highestRisk="read", baseRevision=SceneData:GetRevision() }
+    local rank = { read=0, write=1, high=2 }
+    local mutationCount = 0
+    for _, call in ipairs(calls or {}) do
+        local valid, err = self:ValidateCall(call.name, call.params, {source="ai"}, {ignoreApproval=true})
+        if not valid then return false, "提案校验失败 [" .. tostring(call.name) .. "]: " .. tostring(err) end
+        local def = _funcs[call.name]
+        local item = { name=call.name, params=call.params or {}, id=call.id, risk=def.risk, description=def.desc }
+        proposal.calls[#proposal.calls + 1] = item
+        if item.risk ~= "read" then mutationCount = mutationCount + 1 end
+        if rank[item.risk] > rank[proposal.highestRisk] then proposal.highestRisk = item.risk end
+    end
+    if mutationCount > 1 then
+        return false, "单个 AI 提案最多包含一个写操作；批量场景修改请使用 generate_* 原子生成器"
+    end
+    return true, proposal
+end
+
+function Registry:FormatProposal(proposal)
+    local lines = { string.format("AI 提案：%d 个操作，最高风险=%s，基于文档版本=%s",
+        #(proposal.calls or {}), tostring(proposal.highestRisk), tostring(proposal.baseRevision)) }
+    for i, call in ipairs(proposal.calls or {}) do
+        lines[#lines + 1] = string.format("%d. [%s] %s %s", i, tostring(call.risk),
+            tostring(call.name), json.encode(call.params or {}))
+    end
+    return table.concat(lines, "\n")
+end
+
+function Registry:ExecuteProposal(proposal)
+    local results = {}
+    local allOk = true
+    if proposal.highestRisk ~= "read" then
+        local SceneData = require("Gameplay.UGC.UGCSceneData")
+        if proposal.baseRevision ~= SceneData:GetRevision() then
+            for _, call in ipairs(proposal.calls or {}) do
+                results[#results + 1] = {
+                    name=call.name, id=call.id, ok=false,
+                    result="文档在确认前已发生变化，请重新提交请求",
+                }
+            end
+            return false, results
+        end
+    end
+    for _, call in ipairs(proposal.calls or {}) do
+        local ok, result = self:Call(call.name, call.params, {
+            source="ai", approved=true, requestId=proposal.requestId,
+            toolCallId=call.id, baseRevision=proposal.baseRevision,
+        })
+        results[#results + 1] = { name=call.name, id=call.id, ok=ok, result=result }
+        if not ok then allOk = false end
+    end
+    return allOk, results
 end
 
 --============================================================
@@ -619,28 +742,29 @@ end
 --============================================================
 
 function Registry:GetSchemas()
-    local parts = {}
-    for name, def in pairs(_funcs) do
-        local paramParts = {}
+    local schemas = {}
+    local names = self:ListFunctions()
+    for _, name in ipairs(names) do
+        local def = _funcs[name]
+        local properties = {}
         local required = {}
         for _, p in ipairs(def.params or {}) do
-            table.insert(paramParts, string.format(
-                '"%s":{"type":"%s","description":"%s"}',
-                p.name, p.type, p.desc
-            ))
-            if p.required then
-                table.insert(required, '"' .. p.name .. '"')
-            end
+            properties[p.name] = { type=p.type, description=p.desc }
+            if p.enum then properties[p.name].enum = p.enum end
+            if p.min then properties[p.name].minimum = p.min end
+            if p.max then properties[p.name].maximum = p.max end
+            if p.required then required[#required + 1] = p.name end
         end
-        table.insert(parts, string.format(
-            '{"type":"function","function":{"name":"%s","description":"%s","parameters":{"type":"object","properties":{%s},"required":[%s]}}}',
-            name,
-            def.desc,
-            table.concat(paramParts, ","),
-            table.concat(required, ",")
-        ))
+        schemas[#schemas + 1] = {
+            type="function",
+            ["function"]={
+                name=name,
+                description=def.desc,
+                parameters={ type="object", properties=properties, required=required, additionalProperties=false },
+            },
+        }
     end
-    return "[" .. table.concat(parts, ",") .. "]"
+    return json.encode(schemas)
 end
 
 --============================================================
