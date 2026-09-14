@@ -65,6 +65,11 @@ public class UnLuaEditor : ModuleRules
                 "UnrealEd",
 #if UE_5_0_OR_LATER
                 "DeveloperToolSettings",
+                // 本机（UE 5.4）补：UnLuaLuaEditorSettings 继承 UDeveloperSettings（DeveloperSettings 模块），
+                // UnLuaAssetMenu.cpp 用 UContentBrowserAssetContextMenuContext（ContentBrowser 模块）。
+                // 缺这两个模块时 UnLuaEditor 链接报 14 个未解析符号，整个 Editor 目标建不出来。
+                "DeveloperSettings",
+                "ContentBrowser",
 #endif
                 "EditorStyle",
                 "ApplicationCore",
