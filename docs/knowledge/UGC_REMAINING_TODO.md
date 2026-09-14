@@ -6,8 +6,7 @@
 
 ## 快速选择建议
 
-- **已完成**：T1（序列化收敛）、T13（结构化日志）、T18（死代码清理）
-- **部分完成**：T19（依赖瘦身与守卫已落地，完整 Shipping 构建需 UE 5.4）
+- **已完成**：T1（序列化收敛）、T4（Golden 场景回归）、T13（结构化日志）、T14（备份轮转/自动保存/崩溃恢复）、T15（显式迁移链）、T18（死代码清理）、T19（依赖瘦身 + 守卫 + UE 5.4 Shipping 构建验证）
 - **低成本对齐（半天内）**：T2（需编辑器）
 - **产品化主干**：T3、T5、T10、T6
 - **多人方向**（需先定目标）：T7、T12
@@ -44,6 +43,7 @@
 - 优先级：P1 ｜ 规模：M ｜ 依赖：T1
 - 目标：把「存档不漂移」变成可自动判定的回归，而不是靠人工看。
 - 验收：仓库内 3 个 Golden 场景样本（含 external/PCG、Group、Program）；CI 或脚本可比对序列化输出差异并给出定位。
+- 状态：**已完成（2026-09-14）**，验收全部满足；详见「已执行记录」。
 
 ### T5 Prefab 迁移 `UPrimaryDataAsset` + `AssetManager`
 - 优先级：P1 ｜ 规模：L ｜ 依赖：无
@@ -97,11 +97,13 @@
 - 优先级：P2 ｜ 规模：M ｜ 依赖：T1
 - 目标：存档目前只保留 1 代 `.bak`，无自动保存与崩溃恢复。
 - 验收：备份轮转（N 代）；自动保存策略与节流；异常退出后可恢复到最近有效版本。
+- 状态：**已完成（2026-09-14）**，验收全部满足；详见「已执行记录」。
 
 ### T15 显式迁移链 V1 → V2 → V3
 - 优先级：P2 ｜ 规模：M ｜ 依赖：T14
 - 目标：当前只有「旧格式只读兼容」，没有版本化迁移链与迁移测试。
 - 验收：每级迁移有独立函数与样本文件；迁移失败可回滚且不损坏原文件。
+- 状态：**已完成（2026-09-14）**，验收全部满足；详见「已执行记录」。
 
 ### T16 Compiler 错误列表 UI
 - 优先级：P3 ｜ 规模：S ｜ 依赖：无
@@ -119,13 +121,80 @@
 - 验收：删除或标注 deprecated；`SceneData` 旧序列化入口收敛为「仅加载兼容」。
 - 状态：**已完成（2026-09-14）**；详见「已执行记录」。
 
-### T19 Runtime 依赖瘦身 + Shipping 构建验证（部分完成）
+### ~~T19 Runtime 依赖瘦身 + Shipping 构建验证~~ ✅ 已完成
 - 优先级：P2 ｜ 规模：L ｜ 依赖：T11
 - 目标：`FPS.Build.cs` 的 Runtime 依赖仍含 UMG/Slate/HTTP/PCG。
 - 验收：至少完成一次 Shipping 目标构建验证；Runtime Core 不依赖 DesktopPlatform 与裸磁盘资产扫描。
-- 状态：**依赖与守卫已完成；完整 Shipping 构建验证受环境阻塞（2026-09-14）**。剩余部分需要 UE 5.4 环境 + 该机器上的 .NET SDK，详见「已执行记录」。
+- 状态：**已完成（2026-09-14）**；UE 5.4 `FPS Win64 Shipping` 构建通过（exit 0，产出 `FPS-Win64-Shipping.exe`），
+  细节见「已执行记录」。剩余未做的只有 T11 级别的更进一步拆分（Runtime Core 只依赖 Core/CoreUObject/Engine）。
 
 ## 已执行记录
+
+- **T14 备份轮转 + 自动保存 + 崩溃恢复（2026-09-14）**
+  - 世代布局：`<file>.bak`（最新，仍由 C++ 原子写维护）→ `<file>.bak1` → `<file>.bak2`；默认 3 代，上限 9
+    （`ConfigureBackups`，`MAX_BACKUP_GENERATIONS`）。
+  - 轮转只用「读上一代 + 原子写下一代」，不依赖 rename/delete，因此可以在没有删除能力的存储边界上成立；
+    **写盘前先轮转**，这样 `.bak` 永远是「上一次成功保存」的内容，轮转中途崩溃最坏只丢一代更旧的备份。
+  - 存储边界相应放宽：`UUGCStorageBridge::IsAllowedJsonPath` 现在还接受 `.bak` / `.bakN`（仍是 `Saved/` 下的白名单，
+    其余后缀照旧拒绝）。这是 T14 的必要条件，已在 `ASSETS_AND_CONFIG.md` 记录。
+  - 自动保存：`AttachProject` 绑定项目 → `UGCPlayerController:ReceiveTick` 调 `Persistence:Tick(deltaSeconds)`；
+    受 `intervalSeconds`（默认 120）与 `minIntervalSeconds`（默认 30）双重节流，且只在 revision 相对上次保存变化时才写。
+    `ConfigureAutosave` 可改策略，`GetAutosaveRuntime` 可读运行时状态。
+  - 崩溃恢复：`LoadProject` 在主文件不可解码/校验失败时按世代从新到旧回退，第三个返回值给
+    `{ recovered, generation, from, reason, migration }`，并且**不覆盖主文件**（决策权留给下一次保存）。
+    `RestoreFromBackup(path, scene, generation?)` 是显式恢复入口。WBP_UGCEditor 加载后会提示「已从备份恢复」。
+  - 回归：`Tools/UGCTests/run_persistence.lua` 从 1 项扩到 7 项（精确保存、N 代顺序、世代数配置与 clamp、
+    自动保存 interval/节流/revision 判定/禁用/未绑定、崩溃恢复三级回退、主文件缺失恢复、存储边界后缀）。
+
+- **T15 显式迁移链 V1 → V2 → V3（2026-09-14）**
+  - 新增 `Content/Script/Gameplay/UGC/UGCMigrations.lua`：`Steps` 表里每级一个纯函数（只负责 `i → i+1`），
+    `Migrate` 先深拷贝再逐级 pcall，任一步失败整链失败并返回原因；入参在任何失败路径下都不被修改。
+    `CURRENT` 是唯一版本号来源，`UGCDocument` 的 `CURRENT_SCHEMA_VERSION` 直接取它，避免双维护漂移。
+  - V1 → V2：收敛旧字段（`id`/`prefab`/`t` → `sceneID`/`prefabName`/`transform`）、补齐
+    `entityId`/`actorId`/`programId`、按最大 sceneID 推导 `nextSceneID`、布尔标志归一化。
+  - V2 → V3：补齐 `tags`/`properties`/`metadata` 容器与 `header.contentVersion`，组内成员归一化为 number 并
+    丢弃悬空引用（否则 `ValidateSnapshot` 会整份拒绝），世界规则值归一化为 number 并丢弃非数值项，
+    这些丢弃项都计入 `report.notes`。
+  - 接入点：`Document.FromSnapshot` 对所有入口先迁移再校验（新包 / 旧包 / 旧 scene.json 兼容层同一条链）；
+    `UGCPersistence:MigrateProject` 提供显式迁移并原子写回（写前先轮转，迁移前内容留在 `.bak`）。
+  - 样本与回归：样本 `Tools/UGCTests/fixtures/migration_v1.ugc.json`、`migration_v2.ugc.json`；
+    新增 `Tools/UGCTests/run_migration.lua` 8 项，覆盖两级迁移、当前版本空操作与逐字节稳定、幂等、
+    未知版本拒绝且不改入参、步骤抛异常时整链失败且不改入参、`Document.FromSnapshot` 集成、
+    加载路径「迁移但不重写文件」、以及 `MigrateProject` 的成功/无操作/失败三条路径。
+  - 与 T4 的关系：v3 文档迁移是严格空操作，所以 golden 样本逐字节不变；一旦迁移逻辑改动意外触及 v3，
+    `run_golden.lua` 会立刻报差异。
+
+- **T4 Golden 场景与序列化回归（2026-09-14）**
+  - 新增 `Tools/UGCTests/golden/`，3 个场景样本（均为可直接加载的版本化存档包）：
+    `external_pcg.ugc.json`（外部实体 metadata.kind=pcg + worldSettings）、
+    `groups.ugc.json`（匿名 batch_1 + 具名 batch_forest_a）、
+    `program.ugc.json`（level_main + actor_prog_1）。
+  - 新增 `Tools/UGCTests/run_golden.lua`，每个样本两组判定：
+    `construct`（用公开 API 从零构出同一文档 → 序列化 → 与样本逐字节比对）
+    与 `roundtrip`（样本 → DeserializePackageTable → 再序列化 → 必须等于样本，不动点）。
+    program 样本额外跑 `Compiler:Compile`，保证「存得下来的程序」同时「编译得过」。
+  - 归一化只做两件事：`savedAt`（os.time 不可复现）置 0、行尾 CRLF 对齐 LF；其余逐字节比对，
+    不存在被忽略的字段。
+  - 差异定位：先给 JSON 路径级结构差异（如 `package.document.entities.2.transform.1: expected 999, got 300`），
+    再给行号级 LCS diff（`- golden:49` / `+ 输出:49`），最后提示用 `--update` 重新生成样本。
+    已用「人为改坏样本」实测过失败路径：报告可定位、退出码非 0。
+  - 重新生成样本：`Temp/LuaTools/lua54.exe Tools/UGCTests/run_golden.lua <repo-root> --update`，
+    然后 review `git diff Tools/UGCTests/golden/`。
+  - 已接入 `Tools/UGCTests/run_tests.ps1`（紧跟 `run_serialization.lua`）；回归总数 32 → 39 项。
+  - 注意：任何改动文档/命令/序列化形状的工作（T8 属性、T14 备份、T15 迁移链）都会先在这里看到差异 ——
+    这是本项的目的，不要用 `--update` 掩盖非预期漂移。
+
+- **合并损伤修复（2026-09-14，本轮，无 T 编号）**
+  - 背景：`5553fd8` 那次 develop 合并把 `UGCSceneData.lua` 解析成新旧两份实现的拼接，
+    Lua 5.4 语法失败，`run_tests.ps1` 的语法门直接挂；T19 的 `FPS.Build.cs` 也被回退。
+  - 修复：`UGCSceneData.lua` 以新架构（Document + CommandBus + Projection）为基线重建，并补回 Anim 侧唯一有意义的增量
+    `SetActorCreatedHook` / `BeginNamedBatch` / `EndActiveBatch` / `GetActiveBatch`；
+    `UGCWorldProjection` 增加 `onSpawn` 钩子；4 处 `require("Gameplay.UGC.json")` 改 `Util.json`；
+    `AnimGenClient.cpp` 的 DesktopPlatform 与文件对话框收进 `#if WITH_EDITOR`；`FPS.Build.cs` 恢复 T19 布局 + `glTFRuntime`；
+    10 处裸 `print` 改 `UGCLog`。
+  - 验证：59 文件语法 + 5 组静态守卫 + 32 项 Lua 回归全绿；跨模块别名调用静态检查 0 处悬空。
+  - 细节与已知语义缺口见 `RISKS_AND_GAPS.md` 的「2026-09-14 合并损伤与修复」。
+  - 修复前请先确认这条记录仍然成立：任何后续合并后都要先跑 `Tools/UGCTests/run_tests.ps1`。
 
 - **T1 序列化收敛（2026-09-14）**
   - 唯一实现：`Content/Script/Util/json.lua`（对象键字典序输出保证可 diff；NaN/Inf 编码为 `null`；decode 失败返回 nil 不抛异常）。
@@ -154,7 +223,18 @@
 
 - **T19 运行时依赖瘦身 + Shipping 验证（2026-09-14，部分完成）**
   - `FPS.Build.cs`：`HTTP`/`Json`/`PCG` 降为 Private；移除未使用的 `Niagara`、`ApplicationCore`；保留 `AIModule`（`FPSCharacter.h` 暴露 `IGenericTeamAgentInterface`）；`DesktopPlatform` 仍 editor-only。
-  - 静态守卫：编辑器专用 include/符号必须位于 `#if WITH_EDITOR` 内；`FPS.Build.cs` 必须保留 `Target.bBuildEditor` 且不得重新引入 Niagara/ApplicationCore。
+  - **修正（同日 UE 5.4 实测）**：`ApplicationCore` 被上面这条删错了 —— `UGC/UGCPlayerController.cpp` 调
+    `FPlatformApplicationMisc::ClipboardCopy`，删掉后开发构建链接报 `LNK2019`（1 个未解析符号）。
+    已加回 Private，并把 `run_tests.ps1` 的依赖守卫改成「必须保留 ApplicationCore」。
+    教训：UBT/UHT 解析级证据不能替代链接级证据；「没有符号引用」的结论必须在真实链接后成立。
+  - 静态守卫：编辑器专用 include/符号必须位于 `#if WITH_EDITOR` 内；`FPS.Build.cs` 必须保留 `Target.bBuildEditor`、不得重新引入 Niagara、且必须保留 ApplicationCore。
   - Shipping 探针（UE 5.7 + 临时补丁）抓到并修复真实缺陷：`InventoryGridComponent.cpp` 误引 Editor-only 的 `IDetailTreeNode.h`（未使用）导致 `fatal error C1083`。
-  - 验证情况：新增 `UGCLog.cpp` 在 Shipping 配置下单文件编译通过；完整 Shipping 构建被 UnLua 5.7 不兼容阻塞（net6 UBT 插件 + UHT API 变更），**需在 UE 5.4 环境复验**；细节见 `RISKS_AND_GAPS.md`。
+  - 验证情况（UE 5.4 实测，2026-09-14）：
+    * **Shipping 目标构建通过（exit 0）**：`Build.bat FPS Win64 Shipping` 编译 9 个 `Module.FPS.*.cpp` 后
+      `Link [x64] FPS-Win64-Shipping.exe` 成功，产出 147 MB 可执行文件 + pdb + target；链接期零未解析符号。
+      这同时反证 `#if WITH_EDITOR` 守卫有效（DesktopPlatform 若漏出，Shipping 必挂）。T19 验收项达成。
+    * 开发（编辑器）目标下 FPS 模块也已编译 + 链接成功，但整个 Editor 目标仍被第三方 UnLua 的
+      `UnLuaEditor` 模块链接失败阻塞（13 个 `UDeveloperSettings` / `UContentBrowserAssetContextMenuContext` 符号，
+      插件侧 `Build.cs` 缺 `DeveloperSettings`/`ContentBrowser`，且该插件源码被 gitignore，属本机环境修复）。
+      它不是 T19 的验收条件，但是 T3（PIE 验收）的前置条件。
   - 所有探针临时改动已逐字节还原（SHA256 校验通过）。

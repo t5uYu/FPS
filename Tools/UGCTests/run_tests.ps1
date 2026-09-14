@@ -113,12 +113,21 @@ $BuildCs = Get-Content -LiteralPath (Join-Path $Root "Source\FPS\FPS.Build.cs") 
 if ($BuildCs -notmatch 'Target\.bBuildEditor') {
     throw "FPS.Build.cs must keep DesktopPlatform behind Target.bBuildEditor"
 }
-foreach ($Banned in @('"Niagara"', '"ApplicationCore"')) {
+foreach ($Banned in @('"Niagara"')) {
     if ($BuildCs.Contains($Banned)) {
         throw "FPS.Build.cs reintroduced an unused dependency: $Banned (T19 removed it; document the new usage if it is really needed)"
     }
 }
-Write-Output "Dependency guards OK: DesktopPlatform is editor-only, no unused Niagara/ApplicationCore"
+# ApplicationCore is a verified real dependency: UGC/UGCPlayerController.cpp calls
+# FPlatformApplicationMisc::ClipboardCopy (HAL/PlatformApplicationMisc.h). Removing it made the
+# 2026-09-14 UE 5.4 development build fail with LNK2019 (1 unresolved external symbol), so this
+# guard now requires it instead of banning it as dead weight.
+# NOTE: keep this script pure ASCII - PowerShell 5.1 decodes BOM-less files as ANSI, so non-ASCII
+# comments/literals here break parsing (this file is read by the plain `powershell` host).
+if (-not $BuildCs.Contains('"ApplicationCore"')) {
+    throw "FPS.Build.cs must keep ApplicationCore: UGC/UGCPlayerController.cpp uses FPlatformApplicationMisc::ClipboardCopy (verified by a UE 5.4 link)"
+}
+Write-Output "Dependency guards OK: DesktopPlatform is editor-only, Niagara stays removed, ApplicationCore kept for ClipboardCopy"
 $RootLua = $Root -replace '\\','/'
 & $LuaExe (Join-Path $PSScriptRoot "run.lua") $RootLua
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -229,6 +229,9 @@ C++ 也维护 `MenuStack`、设置、地图与 Raid 流程。当前运行资产�
 - 主格式：单一版本化 `*.ugc.json`，包含 Document、Programs、Groups、WorldSettings 和 editor state。
 - `UUGCStorageBridge` 提供 UTF-8 读取和 temp/verify/backup/rename 原子写入；Widget、LLM、Prefab Registry 不再直接 `io.open/os.execute`。
 - 旧 `scene.json + programs.json` 仍可读取迁移。
+- 备份与恢复（T14）：`UGCPersistence` 维护 N 代备份（默认 3，上限 9），布局为 `<file>.bak`（最新）→ `<file>.bak1` → `<file>.bak2`；轮转只做「读上一代 + 原子写下一代」，所以不需要 rename/delete，写盘前先轮转。加载时主文件不可用会按世代回退到最近一个可解码且校验通过的备份（`LoadProject` 第三个返回值带 `recovered/generation/from`），显式恢复用 `RestoreFromBackup`；恢复过程不覆盖主文件。
+- 自动保存（T14）：`AttachProject` 绑定项目后由 `UGCPlayerController:ReceiveTick` 驱动 `Persistence:Tick(deltaSeconds)`，受 `intervalSeconds`（默认 120）与 `minIntervalSeconds`（默认 30）双重节流，且只在 Document revision 相对上次保存变化时才写盘。
+- 迁移链（T15）：`UGCMigrations` 是唯一的版本迁移实现，Steps 表里每一步只负责 `i → i+1`；`Document.FromSnapshot` 对所有入口先迁移再校验，`Persistence:MigrateProject` 提供原子写回的显式迁移入口。迁移失败不写盘，内存文档也不会被半套修改。
 - 编解码只有一份：`Content/Script/Util/json.lua`。对象键按字典序输出以保证存档可 diff；非有限数（NaN/Inf）编码为 `null`；decode 失败返回 nil 而不抛异常。`Gameplay/UGC/json.lua` 与 `UGCSerialize.lua` 已删除，`Tools/UGCTests/run_tests.ps1` 有静态守卫断言它们不再出现。
 - `Saved/UGC/` 不进 Git。
 
